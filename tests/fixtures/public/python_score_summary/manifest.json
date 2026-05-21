@@ -1,0 +1,62 @@
+{
+  "fixture_set": "python_score_summary",
+  "title": "Python Score Summary Demo",
+  "privacy": "public_safe",
+  "assessment_type": "code_assignment",
+  "evidence_type": "code",
+  "language": "python",
+  "files": [
+    {
+      "path": "assessment_materials/problem_statement.md",
+      "purpose": "assessment_material",
+      "description": "Beginner Python exercise with three required functions."
+    },
+    {
+      "path": "answer_key_sources/model_answer.py",
+      "purpose": "answer_key_source",
+      "description": "Reference implementation."
+    },
+    {
+      "path": "rubrics/scoring_guide.md",
+      "purpose": "rubric_source",
+      "description": "Human-readable scoring guide."
+    },
+    {
+      "path": "submission_evidence/student_001_correct.py",
+      "purpose": "submission_evidence",
+      "expected_profile": "correct",
+      "description": "Correct direct implementation."
+    },
+    {
+      "path": "submission_evidence/student_002_partial.py",
+      "purpose": "submission_evidence",
+      "expected_profile": "partial",
+      "description": "Mostly correct but excludes scores equal to the passing threshold."
+    },
+    {
+      "path": "submission_evidence/student_003_incorrect.py",
+      "purpose": "submission_evidence",
+      "expected_profile": "incorrect",
+      "description": "Incorrect average, incorrect passing count, and incomplete report."
+    },
+    {
+      "path": "submission_evidence/student_004_alternative_valid.py",
+      "purpose": "submission_evidence",
+      "expected_profile": "alternative_valid",
+      "description": "Correct alternative implementation."
+    },
+    {
+      "path": "submission_evidence/student_005_syntax_error.py",
+      "purpose": "submission_evidence",
+      "expected_profile": "invalid_syntax",
+      "description": "Contains a syntax error for parser and feedback-path testing."
+    }
+  ],
+  "suggested_checks": [
+    "All required functions exist.",
+    "average_score handles non-empty and empty lists.",
+    "count_passing includes scores equal to the threshold.",
+    "score_report returns average, passing, and total keys.",
+    "Submitted Python file imports without syntax errors."
+  ]
+}

@@ -16,6 +16,8 @@ Thumbs.db
 # Dependencies
 node_modules/
 vendor/
+__pycache__/
+*.py[cod]
 
 # Build outputs
 dist/
@@ -33,4 +35,23 @@ pnpm-debug.log*
 tmp/
 temp/
 .cache/
+.pytest_cache/
 
+# Local artifact and upload storage
+uploads/
+artifacts/
+local-artifacts/
+storage/
+
+# Local databases and dumps
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql.gz
+
+# Local-only test fixtures
+tests/fixtures/private/
+
+# Private documentation
+private-docs/
