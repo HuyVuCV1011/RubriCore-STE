@@ -15,12 +15,14 @@ from app.db.session import SessionLocal  # noqa: E402
 
 FIXTURE_ROOT = Path("tests/fixtures/public/python_score_summary")
 PURPOSE_MAP = {
-    "assessment_material": "assessment-material",
-    "answer_key_source": "answer-key-source",
-    "submission_evidence": "submission-evidence",
-    "reference_solution": "reference-solution",
-    "extracted_representation": "extracted-representation",
-    "rubric_source": "assessment-material",
+    "assessment_material": "assessment_material",
+    "answer_key_source": "answer_key_source",
+    "submission_evidence": "submission_evidence",
+    "reference_solution": "reference_solution",
+    "extracted_representation": "extracted_representation",
+    "rubric_source": "rubric_source",
+    "knowledge_source": "knowledge_source",
+    "converted_markdown": "converted_markdown",
 }
 
 
@@ -29,17 +31,28 @@ def load_manifest() -> dict:
 
 
 def detect_category(path: Path) -> str:
-    if path.suffix == ".py":
+    if path.suffix in {".py", ".sql", ".js", ".ts"}:
         return "code"
-    if path.suffix in {".md", ".txt"}:
+    if path.suffix in {".md", ".markdown", ".txt", ".rtf", ".pdf", ".doc", ".docx"}:
         return "document"
+    if path.suffix in {".csv", ".tsv", ".xlsx", ".json", ".xml"}:
+        return "data"
     return "unknown"
+
+
+def normalize_access_scope(value: str | None) -> str:
+    if value is None:
+        return "organization"
+    normalized = value.replace("-", "_")
+    allowed = {"private", "course", "organization", "subject_pack", "public_safe"}
+    return normalized if normalized in allowed else "organization"
 
 
 def ingest_public_fixture() -> tuple[int, int]:
     manifest = load_manifest()
     loaded = 0
     rejected = 0
+    access_scope = normalize_access_scope(manifest.get("privacy"))
 
     with SessionLocal() as db:
         organization = db.scalar(
@@ -79,6 +92,7 @@ def ingest_public_fixture() -> tuple[int, int]:
                     checksum_sha256=hashlib.sha256(data).hexdigest(),
                     storage_uri=f"fixture://public/python_score_summary/{item['path']}",
                     import_source="public_fixture",
+                    access_scope=access_scope,
                     parser_support_status="unknown",
                     status="active",
                     metadata_payload={

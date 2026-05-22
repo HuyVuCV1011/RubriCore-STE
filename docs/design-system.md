@@ -172,6 +172,33 @@ A subject pack may include:
 
 Subject packs should remain configuration. They should not create hard-coded subject pathways or override the core architecture.
 
+## Knowledge Library and Document Ingestion
+
+RubriCore-STE should support a knowledge library for reusable grading knowledge. Trusted users may provide Markdown files or upload documents and code artifacts that can be converted into Markdown and used to suggest rubric criteria, grading guidance, feedback themes, and other grading-related recommendations.
+
+The knowledge library is one platform feature inside the broader assessment system. It should be connected to rubric authoring and grading assistance, but it must not silently publish rubric criteria or override teacher decisions. Knowledge-derived suggestions should remain explainable and teacher-approved.
+
+Supported uses may include:
+
+- suggesting rubric criteria
+- suggesting scoring guidance
+- suggesting common feedback themes
+- suggesting accepted answer variants
+- retrieving relevant grading guidance during review
+- enriching subject pack configuration
+
+The library should accept Markdown directly and support conversion from other formats through adapters. Examples include `.md`, `.pdf`, `.doc`, `.docx`, `.txt`, `.rtf`, `.sql`, `.py`, `.js`, `.ts`, notebooks, spreadsheets, structured data files, images with OCR or captions, and archives when they can be safely extracted. This is not a closed list.
+
+Document ingestion should treat files as source artifacts first. Supported adapters may convert source files into Markdown. Unknown formats should be stored with parser status when allowed and routed to review or manual handling when they cannot be interpreted.
+
+Recommended flow:
+
+`upload/import -> source artifact -> detection -> access classification -> Markdown conversion -> validation -> knowledge source version -> derived chunks or summaries -> rubric suggestion or grading assistance -> teacher approval -> audit trail`
+
+Markdown is the preferred normalized knowledge format because it is readable, versionable, and useful for retrieval and AI-assisted workflows. Original source files and converted Markdown should both remain traceable.
+
+Access scope must be enforced for private, organization, course, subject-pack, and public-safe knowledge sources. AI-assisted use of knowledge sources must respect access scope and provider policy.
+
 ## Python-First Backend Direction
 
 RubriCore-STE should use a Python-first backend with clean modular boundaries.
@@ -186,6 +213,7 @@ The intended backend direction includes:
 - Pydantic for typed schemas and validation
 - an async job queue for grading, AI calls, regrades, and evidence processing
 - object storage for uploaded files and large artifacts
+- Markdown conversion and knowledge-library ingestion for reusable grading knowledge
 - an AI provider abstraction for external APIs and future self-hosted models
 
 Core grading logic should not depend directly on a specific AI vendor, model, database implementation, or web framework.
@@ -198,6 +226,7 @@ Public documentation must not include:
 - private learner, teacher, school, or organization information
 - production credentials, API keys, tokens, or secrets
 - private prompts or proprietary grading prompts
+- private knowledge library sources
 - confidential rubric datasets
 - unpublished evaluation datasets
 - internal model benchmarks that are not approved for release

@@ -134,11 +134,14 @@ def _seed_rubric_types(db: Session, organization: Organization) -> None:
 
 def _seed_file_purposes(db: Session, organization: Organization) -> None:
     records = [
-        ("assessment-material", "Assessment Material"),
-        ("answer-key-source", "Answer Key Source"),
-        ("submission-evidence", "Submission Evidence"),
-        ("reference-solution", "Reference Solution"),
-        ("extracted-representation", "Extracted Representation"),
+        ("assessment_material", "Assessment Material"),
+        ("answer_key_source", "Answer Key Source"),
+        ("submission_evidence", "Submission Evidence"),
+        ("reference_solution", "Reference Solution"),
+        ("extracted_representation", "Extracted Representation"),
+        ("rubric_source", "Rubric Source"),
+        ("knowledge_source", "Knowledge Source"),
+        ("converted_markdown", "Converted Markdown"),
     ]
     for key, name in records:
         exists = db.scalar(

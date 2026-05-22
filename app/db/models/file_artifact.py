@@ -22,11 +22,16 @@ class FileArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     checksum_sha256: Mapped[str | None] = mapped_column(String(64))
     storage_uri: Mapped[str] = mapped_column(String(1000), nullable=False)
     import_source: Mapped[str] = mapped_column(String(80), nullable=False)
+    access_scope: Mapped[str] = mapped_column(String(40), nullable=False, default="organization")
     parser_support_status: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
     metadata_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     __table_args__ = (
+        CheckConstraint(
+            "access_scope in ('private', 'course', 'organization', 'subject_pack', 'public_safe')",
+            name="file_artifact_access_scope",
+        ),
         CheckConstraint(
             "parser_support_status in ('unknown', 'supported', 'unsupported', 'failed')",
             name="file_artifact_parser_support_status",
@@ -40,9 +45,53 @@ class FileArtifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="file_artifact_size_nonnegative",
         ),
         Index("ix_file_artifacts_organization_status", "organization_id", "status"),
+        Index("ix_file_artifacts_organization_scope", "organization_id", "access_scope"),
         Index("ix_file_artifacts_purpose", "file_purpose_id"),
         Index("ix_file_artifacts_organization_purpose", "organization_id", "file_purpose_id"),
         Index("ix_file_artifacts_checksum", "checksum_sha256"),
+    )
+
+
+class ArtifactConversion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "artifact_conversions"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    source_file_artifact_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("file_artifacts.id"),
+        nullable=False,
+    )
+    converted_file_artifact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("file_artifacts.id"))
+    conversion_type: Mapped[str] = mapped_column(String(80), nullable=False, default="markdown")
+    conversion_status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending")
+    converter_name: Mapped[str | None] = mapped_column(String(160))
+    converter_version: Mapped[str | None] = mapped_column(String(80))
+    conversion_schema_version: Mapped[str] = mapped_column(String(80), nullable=False, default="1.0")
+    access_scope: Mapped[str] = mapped_column(String(40), nullable=False, default="organization")
+    warnings: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    metadata_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        CheckConstraint(
+            "conversion_type in ('markdown', 'text', 'preview', 'metadata')",
+            name="artifact_conversion_type",
+        ),
+        CheckConstraint(
+            "conversion_status in ('pending', 'running', 'completed', 'unsupported', 'failed')",
+            name="artifact_conversion_status",
+        ),
+        CheckConstraint(
+            "access_scope in ('private', 'course', 'organization', 'subject_pack', 'public_safe')",
+            name="artifact_conversion_access_scope",
+        ),
+        Index("ix_artifact_conversions_organization_status", "organization_id", "conversion_status"),
+        Index("ix_artifact_conversions_source", "source_file_artifact_id"),
+        Index("ix_artifact_conversions_converted", "converted_file_artifact_id"),
+        Index(
+            "ix_artifact_conversions_source_type",
+            "source_file_artifact_id",
+            "conversion_type",
+        ),
     )
 
 

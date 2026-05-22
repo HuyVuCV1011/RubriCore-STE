@@ -118,6 +118,8 @@ RubriCore-STE stores uploaded or imported files outside relational database rows
 
 File extension and MIME type should not determine a file's role by themselves. Prompt materials, answer key sources, learner submissions, reference solutions, and extracted representations should be tracked by explicit purpose metadata.
 
+Knowledge-library inputs follow the same artifact-first rule. Markdown files can be used directly, while supported document, note, code, spreadsheet, image, or archive formats may later be converted into Markdown for rubric suggestions and grading guidance. Unsupported formats should remain stored artifacts with parser status rather than being silently discarded.
+
 ## Running the Application
 
 Once the FastAPI application entrypoint is available, run the development server with the documented project command, typically similar to:
@@ -167,6 +169,7 @@ Do not include:
 - private rubric datasets
 - unpublished evaluation datasets
 - sensitive school, learner, teacher, or organization information
+- private knowledge-library sources
 
 ## Current Status
 
