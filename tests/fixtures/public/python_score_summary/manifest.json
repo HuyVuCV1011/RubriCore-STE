@@ -2,7 +2,7 @@
   "fixture_set": "python_score_summary",
   "title": "Python Score Summary Demo",
   "privacy": "public_safe",
-  "assessment_type": "code_assignment",
+  "assessment_type": "code-assignment",
   "evidence_type": "code",
   "language": "python",
   "files": [

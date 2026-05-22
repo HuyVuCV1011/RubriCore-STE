@@ -7,11 +7,13 @@ from app.db.models import (
     EvidenceType,
     FilePurpose,
     Organization,
+    OutputType,
     RubricType,
     SubjectPack,
     User,
 )
 from app.db.session import SessionLocal
+from app.taxonomy import AssessmentTypeKey, EvidenceTypeKey, OutputTypeKey, RubricTypeKey
 
 
 LOCAL_ORG_SLUG = "local-development"
@@ -56,10 +58,11 @@ def _get_or_create_admin(db: Session, organization: Organization) -> None:
 
 def _seed_assessment_types(db: Session, organization: Organization) -> None:
     records = [
-        ("multiple-choice", "Multiple Choice"),
-        ("numeric-answer", "Numeric Answer"),
-        ("short-answer", "Short Answer"),
-        ("constructed-response", "Constructed Response"),
+        (AssessmentTypeKey.MULTIPLE_CHOICE.value, "Multiple Choice"),
+        (AssessmentTypeKey.NUMERIC_ANSWER.value, "Numeric Answer"),
+        (AssessmentTypeKey.SHORT_ANSWER.value, "Short Answer"),
+        (AssessmentTypeKey.CONSTRUCTED_RESPONSE.value, "Constructed Response"),
+        (AssessmentTypeKey.CODE_ASSIGNMENT.value, "Code Assignment"),
     ]
     for key, name in records:
         exists = db.scalar(
@@ -82,10 +85,11 @@ def _seed_assessment_types(db: Session, organization: Organization) -> None:
 
 def _seed_evidence_types(db: Session, organization: Organization) -> None:
     records = [
-        ("text", "Text"),
-        ("numeric", "Numeric"),
-        ("selected-option", "Selected Option"),
-        ("file-metadata", "File Metadata"),
+        (EvidenceTypeKey.TEXT.value, "Text"),
+        (EvidenceTypeKey.NUMERIC.value, "Numeric"),
+        (EvidenceTypeKey.SELECTED_OPTION.value, "Selected Option"),
+        (EvidenceTypeKey.FILE_ARTIFACT.value, "File Artifact"),
+        (EvidenceTypeKey.CODE.value, "Code"),
     ]
     for key, name in records:
         exists = db.scalar(
@@ -106,12 +110,46 @@ def _seed_evidence_types(db: Session, organization: Organization) -> None:
             )
 
 
+def _seed_output_types(db: Session, organization: Organization) -> None:
+    records = [
+        (OutputTypeKey.EXACT_ANSWER.value, "Exact Answer"),
+        (OutputTypeKey.SELECTED_OPTION.value, "Selected Option"),
+        (OutputTypeKey.NUMERIC_VALUE.value, "Numeric Value"),
+        (OutputTypeKey.NUMERIC_VALUE_WITH_UNIT.value, "Numeric Value With Unit"),
+        (OutputTypeKey.SHORT_TEXT.value, "Short Text"),
+        (OutputTypeKey.LONG_TEXT.value, "Long Text"),
+        (OutputTypeKey.STRUCTURED_EXPLANATION.value, "Structured Explanation"),
+        (OutputTypeKey.EXECUTABLE_BEHAVIOR.value, "Executable Behavior"),
+        (OutputTypeKey.CODE_OUTPUT.value, "Code Output"),
+        (OutputTypeKey.FILE_ARTIFACT.value, "File Artifact"),
+        (OutputTypeKey.MIXED_OUTPUT.value, "Mixed Output"),
+    ]
+    for key, name in records:
+        exists = db.scalar(
+            select(OutputType).where(
+                OutputType.organization_id == organization.id,
+                OutputType.key == key,
+            )
+        )
+        if exists is None:
+            db.add(
+                OutputType(
+                    organization_id=organization.id,
+                    key=key,
+                    name=name,
+                    config={"schema_version": "1.0"},
+                    status="active",
+                )
+            )
+
+
 def _seed_rubric_types(db: Session, organization: Organization) -> None:
     records = [
-        ("binary-key", "Binary Key"),
-        ("checklist", "Checklist"),
-        ("analytic-rubric", "Analytic Rubric"),
-        ("criterion-weighted-rubric", "Criterion Weighted Rubric"),
+        (RubricTypeKey.BINARY_KEY.value, "Binary Key"),
+        (RubricTypeKey.CHECKLIST.value, "Checklist"),
+        (RubricTypeKey.ANALYTIC_RUBRIC.value, "Analytic Rubric"),
+        (RubricTypeKey.HOLISTIC_RUBRIC.value, "Holistic Rubric"),
+        (RubricTypeKey.CRITERION_WEIGHTED_RUBRIC.value, "Criterion Weighted Rubric"),
     ]
     for key, name in records:
         exists = db.scalar(
@@ -195,6 +233,7 @@ def seed_development_data() -> None:
         _get_or_create_admin(db, organization)
         _seed_assessment_types(db, organization)
         _seed_evidence_types(db, organization)
+        _seed_output_types(db, organization)
         _seed_rubric_types(db, organization)
         _seed_file_purposes(db, organization)
         _seed_subject_pack(db, organization)

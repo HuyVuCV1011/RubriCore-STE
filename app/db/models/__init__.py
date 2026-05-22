@@ -19,7 +19,7 @@ from app.db.models.review import ReviewTask, TeacherOverride, TeacherReview
 from app.db.models.rubric import AnswerKey, AnswerKeyVersion, Rubric, RubricVersion
 from app.db.models.subject_pack import SubjectPack
 from app.db.models.submission import Submission, SubmissionEvidence
-from app.db.models.taxonomy import AssessmentType, EvidenceType, FilePurpose, RubricType
+from app.db.models.taxonomy import AssessmentType, EvidenceType, FilePurpose, OutputType, RubricType
 
 __all__ = [
     "AIInteraction",
@@ -42,6 +42,7 @@ __all__ = [
     "KnowledgeSource",
     "Learner",
     "Organization",
+    "OutputType",
     "ReviewTask",
     "Rubric",
     "RubricType",

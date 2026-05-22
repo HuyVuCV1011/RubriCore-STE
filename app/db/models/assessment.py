@@ -43,6 +43,7 @@ class AssessmentItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("assessment_types.id"),
         nullable=False,
     )
+    output_type_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("output_types.id"))
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     prompt: Mapped[str | None] = mapped_column(Text)
     position: Mapped[int] = mapped_column(nullable=False, default=0)
@@ -59,4 +60,5 @@ class AssessmentItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_assessment_items_organization_status", "organization_id", "status"),
         Index("ix_assessment_items_assessment_position", "assessment_id", "position"),
         Index("ix_assessment_items_type", "assessment_type_id"),
+        Index("ix_assessment_items_output_type", "output_type_id"),
     )
