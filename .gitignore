@@ -16,6 +16,9 @@ Thumbs.db
 # Dependencies
 node_modules/
 vendor/
+.venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
 

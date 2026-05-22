@@ -28,6 +28,30 @@ def normalize_access_scope(access_scope: str | None) -> str:
     return normalized if normalized in VALID_ACCESS_SCOPES else "organization"
 
 
+def _source_format_from_filename(filename: str) -> str:
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "md": "markdown",
+        "markdown": "markdown",
+        "txt": "text",
+        "rtf": "rtf",
+        "pdf": "pdf",
+        "doc": "doc",
+        "docx": "docx",
+        "py": "python",
+        "js": "javascript",
+        "ts": "typescript",
+        "sql": "sql",
+        "ipynb": "notebook",
+        "csv": "csv",
+        "tsv": "tsv",
+        "xlsx": "xlsx",
+        "json": "json",
+        "xml": "xml",
+        "zip": "archive",
+    }.get(extension, "unknown")
+
+
 def register_markdown_knowledge_source(
     db: Session,
     *,
@@ -65,6 +89,10 @@ def register_markdown_knowledge_source(
         detected_file_category="document",
         storage_uri=source_storage_uri,
         import_source="knowledge_library",
+        owner_user_id=owner_user_id,
+        uploaded_by_user_id=owner_user_id,
+        source_type="knowledge_library",
+        source_format=_source_format_from_filename(source_filename),
         access_scope=scope,
         parser_support_status="supported",
         status="active",
@@ -83,6 +111,10 @@ def register_markdown_knowledge_source(
         detected_file_category="document",
         storage_uri=markdown_storage_uri,
         import_source="knowledge_library_conversion",
+        owner_user_id=owner_user_id,
+        uploaded_by_user_id=owner_user_id,
+        source_type="system_conversion",
+        source_format="markdown",
         access_scope=scope,
         parser_support_status="supported",
         status="active",

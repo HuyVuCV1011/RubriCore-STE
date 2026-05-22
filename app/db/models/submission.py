@@ -50,6 +50,7 @@ class SubmissionEvidence(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="submitted")
 
     submission: Mapped[Submission] = relationship(back_populates="evidence")
+    file_artifact: Mapped["FileArtifact | None"] = relationship(foreign_keys=[file_artifact_id])
 
     __table_args__ = (
         CheckConstraint(

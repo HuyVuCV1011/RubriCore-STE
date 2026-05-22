@@ -40,6 +40,29 @@ def detect_category(path: Path) -> str:
     return "unknown"
 
 
+def detect_source_format(path: Path) -> str:
+    return {
+        ".md": "markdown",
+        ".markdown": "markdown",
+        ".txt": "text",
+        ".rtf": "rtf",
+        ".pdf": "pdf",
+        ".doc": "doc",
+        ".docx": "docx",
+        ".py": "python",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".sql": "sql",
+        ".ipynb": "notebook",
+        ".csv": "csv",
+        ".tsv": "tsv",
+        ".xlsx": "xlsx",
+        ".json": "json",
+        ".xml": "xml",
+        ".zip": "archive",
+    }.get(path.suffix.lower(), "unknown")
+
+
 def normalize_access_scope(value: str | None) -> str:
     if value is None:
         return "organization"
@@ -92,6 +115,8 @@ def ingest_public_fixture() -> tuple[int, int]:
                     checksum_sha256=hashlib.sha256(data).hexdigest(),
                     storage_uri=f"fixture://public/python_score_summary/{item['path']}",
                     import_source="public_fixture",
+                    source_type="fixture_import",
+                    source_format=detect_source_format(path),
                     access_scope=access_scope,
                     parser_support_status="unknown",
                     status="active",
