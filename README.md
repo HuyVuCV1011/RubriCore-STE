@@ -43,6 +43,34 @@ flowchart LR
 | Review tasks | Route uncertainty, ambiguity, low confidence, and policy-sensitive cases to teachers |
 | Audit events | Preserve who did what, why, and with which grading context |
 
+## Rubric Framework
+
+The first production-ready rubric framework is implemented in the backend model and service layer. It keeps the existing versioned JSON rubric snapshot for durable audit records, and adds normalized structures so scoring logic can be inspected without AI.
+
+| Entity | Purpose |
+| --- | --- |
+| `Rubric` | Stable rubric identity with title, optional slug, lifecycle status, draft schema, and subject-agnostic metadata |
+| `RubricVersion` | Immutable published snapshot with version number, source metadata, publisher, and schema payload |
+| `RubricCriterion` | Ordered criterion or dimension with key, label, description, optional weight, and deterministic hints |
+| `PerformanceLevel` | Ordered score band with key, label, description, and numeric score |
+| `RubricDescriptor` | Narrative expectation for each criterion x performance-level pair |
+| `RubricBinding` | Active link from a published rubric version to an assessment, assessment item, or external evaluation context |
+
+Lifecycle expectations:
+
+1. Teachers or fixture importers edit `Rubric.draft_schema`.
+2. Publishing validates the schema, creates the next immutable `RubricVersion`, and materializes criteria, levels, and descriptors.
+3. A binding attaches a published version to an assessment context without mutating the version.
+4. Future grading runs can reference the bound version, while teacher review and audit records can explain exactly which criteria, levels, descriptors, and selected score bands were used.
+
+Rubric validation is deterministic and runs before any AI layer. The service checks required criteria, levels, ordering, non-negative level scores, positive weights, and descriptor completeness across every criterion x level pair. The deterministic scoring helper computes weighted totals from selected performance levels and works without a provider, prompt, or model.
+
+The local seed command creates a synthetic demo rubric for the public Python score-summary fixture:
+
+```sh
+uv run python scripts/seed_dev.py
+```
+
 ## Current Status
 
 This repository is in early Phase 1 development. The public foundation currently includes:
@@ -65,10 +93,13 @@ The project is not yet a complete production application.
 │   └── db/               # SQLAlchemy models, session setup, seed helpers
 ├── alembic/              # Database migrations
 ├── docs/                 # Public documentation
+│   ├── setup.md          # Development setup guide
 │   ├── design-system.md  # Product and system design principles
-│   ├── use-cases.md      # Combined use cases and case studies
-│   ├── case-studies.md   # Pointer to the combined guide
-│   └── setup.md          # Development setup guide
+│   ├── use-cases-and-case-studies.md
+│   └── logic/            # Public system logic and workflow docs
+│       ├── 01-setupdb.md
+│       ├── 02-assessment-taxonomy.md
+│       └── 03-rubric-framework.md
 ├── scripts/              # Development helper scripts
 ├── tests/                # Public fixtures and future tests
 ├── .env.example          # Local environment template
@@ -85,7 +116,10 @@ Read these first:
 | --- | --- |
 | [docs/setup.md](docs/setup.md) | Local environment and database setup |
 | [docs/design-system.md](docs/design-system.md) | Product principles and architecture intent |
-| [docs/use-cases.md](docs/use-cases.md) | Operating scenarios, case studies, and flowcharts |
+| [docs/use-cases-and-case-studies.md](docs/use-cases-and-case-studies.md) | Concise use cases, step-by-step case studies, and flowcharts |
+| [docs/logic/01-setupdb.md](docs/logic/01-setupdb.md) | Public database model, artifact provenance, and setup logic |
+| [docs/logic/02-assessment-taxonomy.md](docs/logic/02-assessment-taxonomy.md) | Assessment taxonomy vocabulary and compatibility boundaries |
+| [docs/logic/03-rubric-framework.md](docs/logic/03-rubric-framework.md) | Rubric entities, lifecycle, deterministic scoring, bindings, and audit expectations |
 
 Basic local setup:
 
@@ -93,23 +127,42 @@ Basic local setup:
 git clone <repository-url>
 cd RubriCore-STE
 
-python -m venv .venv
-source .venv/bin/activate
-
-pip install -r requirements.txt
+uv sync --dev
 cp .env.example .env
 ```
 
 Apply database migrations once PostgreSQL is configured:
 
 ```sh
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 Seed local development records:
 
 ```sh
-python scripts/seed_dev.py
+uv run python scripts/seed_dev.py
+```
+
+Quality checks:
+
+```sh
+uv run ruff format .
+uv run ruff check .
+uv run pyright
+uv run pytest
+uv run pre-commit run --all-files
+```
+
+Install Git hooks once per clone:
+
+```sh
+uv run pre-commit install
+```
+
+Package the public backend, tests, and docs for low-token AI review with Repomix:
+
+```sh
+npx repomix --config repomix.config.json
 ```
 
 ## Knowledge-Learning Loop

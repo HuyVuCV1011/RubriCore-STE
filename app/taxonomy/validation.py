@@ -77,22 +77,19 @@ def validate_taxonomy_combination(
         evidence_key = _coerce(EvidenceTypeKey, evidence_type)
         if evidence_key not in COMPATIBLE_EVIDENCE_TYPES[assessment_key]:
             raise TaxonomyCompatibilityError(
-                f"Evidence type {evidence_key.value!r} is not compatible with "
-                f"assessment type {assessment_key.value!r}."
+                f"Evidence type {evidence_key.value!r} is not compatible with assessment type {assessment_key.value!r}."
             )
 
     if output_type is not None:
         output_key = _coerce(OutputTypeKey, output_type)
         if output_key not in COMPATIBLE_OUTPUT_TYPES[assessment_key]:
             raise TaxonomyCompatibilityError(
-                f"Output type {output_key.value!r} is not compatible with "
-                f"assessment type {assessment_key.value!r}."
+                f"Output type {output_key.value!r} is not compatible with assessment type {assessment_key.value!r}."
             )
 
     if rubric_type is not None:
         rubric_key = _coerce(RubricTypeKey, rubric_type)
         if rubric_key not in COMPATIBLE_RUBRIC_TYPES[assessment_key]:
             raise TaxonomyCompatibilityError(
-                f"Rubric type {rubric_key.value!r} is not compatible with "
-                f"assessment type {assessment_key.value!r}."
+                f"Rubric type {rubric_key.value!r} is not compatible with assessment type {assessment_key.value!r}."
             )

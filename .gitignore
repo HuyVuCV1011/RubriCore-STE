@@ -39,6 +39,8 @@ tmp/
 temp/
 .cache/
 .pytest_cache/
+.ruff_cache/
+repomix-output.*
 
 # Local artifact and upload storage
 uploads/

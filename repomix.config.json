@@ -1,0 +1,48 @@
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "output": {
+    "filePath": "repomix-output.md",
+    "style": "markdown",
+    "removeComments": false,
+    "showLineNumbers": false,
+    "topFilesLength": 12
+  },
+  "include": [
+    "AGENTS.md",
+    "README.md",
+    "pyproject.toml",
+    "requirements.txt",
+    "alembic.ini",
+    "alembic/env.py",
+    "app/**/*.py",
+    "app/**/AGENTS.md",
+    "scripts/**/*.py",
+    "scripts/AGENTS.md",
+    "tests/**/*.py",
+    "tests/fixtures/public/**/*",
+    "tests/AGENTS.md",
+    "docs/**/*.md",
+    "docs/AGENTS.md"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      ".env",
+      ".env.*",
+      "!.env.example",
+      ".venv/**",
+      ".pytest_cache/**",
+      ".ruff_cache/**",
+      "__pycache__/**",
+      "*.pyc",
+      ".DS_Store",
+      "private-docs/**",
+      "uploads/**",
+      "artifacts/**",
+      "local-artifacts/**",
+      "storage/**",
+      "repomix-output.*"
+    ]
+  }
+}

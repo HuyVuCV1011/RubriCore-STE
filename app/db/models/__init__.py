@@ -16,7 +16,16 @@ from app.db.models.grading import (
 from app.db.models.identity import Learner, Organization, User
 from app.db.models.knowledge import KnowledgeSource
 from app.db.models.review import ReviewTask, TeacherOverride, TeacherReview
-from app.db.models.rubric import AnswerKey, AnswerKeyVersion, Rubric, RubricVersion
+from app.db.models.rubric import (
+    AnswerKey,
+    AnswerKeyVersion,
+    PerformanceLevel,
+    Rubric,
+    RubricBinding,
+    RubricCriterion,
+    RubricDescriptor,
+    RubricVersion,
+)
 from app.db.models.subject_pack import SubjectPack
 from app.db.models.submission import Submission, SubmissionEvidence
 from app.db.models.taxonomy import AssessmentType, EvidenceType, FilePurpose, OutputType, RubricType
@@ -43,8 +52,12 @@ __all__ = [
     "Learner",
     "Organization",
     "OutputType",
+    "PerformanceLevel",
     "ReviewTask",
     "Rubric",
+    "RubricBinding",
+    "RubricCriterion",
+    "RubricDescriptor",
     "RubricType",
     "RubricVersion",
     "SubjectPack",

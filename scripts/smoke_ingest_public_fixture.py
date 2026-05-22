@@ -78,9 +78,7 @@ def ingest_public_fixture() -> tuple[int, int]:
     access_scope = normalize_access_scope(manifest.get("privacy"))
 
     with SessionLocal() as db:
-        organization = db.scalar(
-            select(Organization).where(Organization.slug == "local-development")
-        )
+        organization = db.scalar(select(Organization).where(Organization.slug == "local-development"))
         if organization is None:
             raise RuntimeError("Run scripts/seed_dev.py before fixture ingestion.")
 

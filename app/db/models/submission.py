@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -7,6 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.models.common import TimestampMixin, UUIDPrimaryKeyMixin
+
+if TYPE_CHECKING:
+    from app.db.models.file_artifact import FileArtifact
 
 
 class Submission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -16,16 +20,25 @@ class Submission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     assessment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("assessments.id"))
     assessment_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("assessment_items.id"))
     learner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("learners.id"), nullable=False)
+    supersedes_submission_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("submissions.id"))
+    superseded_by_submission_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("submissions.id"))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    status: Mapped[str] = mapped_column(String(40), nullable=False, default="submitted")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
     metadata_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     evidence: Mapped[list["SubmissionEvidence"]] = relationship(back_populates="submission")
 
     __table_args__ = (
         CheckConstraint(
-            "status in ('draft', 'submitted', 'processing', 'graded', 'returned', 'archived')",
+            "status in ("
+            "'draft', 'submitted', 'superseded', 'withdrawn', 'archived', "
+            "'processing', 'graded', 'returned'"
+            ")",
             name="submission_status",
+        ),
+        CheckConstraint(
+            "superseded_by_submission_id is null or status = 'superseded'",
+            name="submission_superseded_by_requires_status",
         ),
         CheckConstraint(
             "assessment_id is not null or assessment_item_id is not null",
@@ -34,6 +47,8 @@ class Submission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index("ix_submissions_organization_status", "organization_id", "status"),
         Index("ix_submissions_assessment_item_learner", "assessment_item_id", "learner_id"),
         Index("ix_submissions_assessment_learner", "assessment_id", "learner_id"),
+        Index("ix_submissions_supersedes", "supersedes_submission_id"),
+        Index("ix_submissions_superseded_by", "superseded_by_submission_id"),
     )
 
 

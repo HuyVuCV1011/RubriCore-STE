@@ -8,9 +8,7 @@ from app.db.base import Base
 from app.db.models.common import TimestampMixin, UUIDPrimaryKeyMixin
 
 
-KNOWLEDGE_ACCESS_SCOPE_CHECK = (
-    "access_scope in ('private', 'course', 'organization', 'subject_pack', 'public_safe')"
-)
+KNOWLEDGE_ACCESS_SCOPE_CHECK = "access_scope in ('private', 'course', 'organization', 'subject_pack', 'public_safe')"
 
 
 class KnowledgeSource(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -8,10 +8,12 @@ from app.db.models import (
     FilePurpose,
     Organization,
     OutputType,
+    Rubric,
     RubricType,
     SubjectPack,
     User,
 )
+from app.db.services.rubrics import create_rubric, publish_rubric_version
 from app.db.session import SessionLocal
 from app.taxonomy import AssessmentTypeKey, EvidenceTypeKey, OutputTypeKey, RubricTypeKey
 
@@ -35,7 +37,7 @@ def _get_or_create_organization(db: Session) -> Organization:
     return organization
 
 
-def _get_or_create_admin(db: Session, organization: Organization) -> None:
+def _get_or_create_admin(db: Session, organization: Organization) -> User:
     user = db.scalar(
         select(User).where(
             User.organization_id == organization.id,
@@ -43,17 +45,18 @@ def _get_or_create_admin(db: Session, organization: Organization) -> None:
         )
     )
     if user is not None:
-        return
+        return user
 
-    db.add(
-        User(
-            organization_id=organization.id,
-            email=LOCAL_ADMIN_EMAIL,
-            display_name="Development Admin",
-            role="admin",
-            status="active",
-        )
+    user = User(
+        organization_id=organization.id,
+        email=LOCAL_ADMIN_EMAIL,
+        display_name="Development Admin",
+        role="admin",
+        status="active",
     )
+    db.add(user)
+    db.flush()
+    return user
 
 
 def _seed_assessment_types(db: Session, organization: Organization) -> None:
@@ -223,6 +226,102 @@ def _seed_subject_pack(db: Session, organization: Organization) -> None:
     )
 
 
+def _seed_demo_rubric(db: Session, organization: Organization, admin: User) -> None:
+    exists = db.scalar(
+        select(Rubric).where(
+            Rubric.organization_id == organization.id,
+            Rubric.slug == "python-score-summary-demo",
+        )
+    )
+    if exists is not None:
+        return
+
+    rubric_type = db.scalar(
+        select(RubricType).where(
+            RubricType.organization_id == organization.id,
+            RubricType.key == RubricTypeKey.ANALYTIC_RUBRIC.value,
+        )
+    )
+    if rubric_type is None:
+        raise RuntimeError("Analytic rubric type must be seeded before demo rubric.")
+
+    draft_schema = {
+        "schema_version": "1.0",
+        "criteria": [
+            {
+                "key": "correctness",
+                "label": "Correctness",
+                "description": "The solution computes the requested score summary accurately.",
+                "weight": "2",
+                "position": 0,
+                "evaluation_hints": {"deterministic_checks": ["unit_tests_pass"]},
+            },
+            {
+                "key": "clarity",
+                "label": "Clarity",
+                "description": "The solution is readable and uses clear names for the data flow.",
+                "weight": "1",
+                "position": 1,
+            },
+        ],
+        "performance_levels": [
+            {"key": "needs_revision", "label": "Needs Revision", "score": "0", "position": 0},
+            {"key": "partial", "label": "Partial", "score": "1", "position": 1},
+            {"key": "meets", "label": "Meets", "score": "2", "position": 2},
+        ],
+        "descriptors": [
+            {
+                "criterion_key": "correctness",
+                "performance_level_key": "needs_revision",
+                "narrative": "Produces incorrect totals or cannot run to completion.",
+            },
+            {
+                "criterion_key": "correctness",
+                "performance_level_key": "partial",
+                "narrative": "Handles the main path but misses edge cases or summary fields.",
+            },
+            {
+                "criterion_key": "correctness",
+                "performance_level_key": "meets",
+                "narrative": "Computes the requested summary accurately for representative inputs.",
+            },
+            {
+                "criterion_key": "clarity",
+                "performance_level_key": "needs_revision",
+                "narrative": "Code structure makes the computation difficult to inspect.",
+            },
+            {
+                "criterion_key": "clarity",
+                "performance_level_key": "partial",
+                "narrative": "Readable in parts, with some unclear names or unnecessary complexity.",
+            },
+            {
+                "criterion_key": "clarity",
+                "performance_level_key": "meets",
+                "narrative": "Uses clear names and a straightforward structure.",
+            },
+        ],
+    }
+
+    rubric = create_rubric(
+        db,
+        organization_id=organization.id,
+        rubric_type_id=rubric_type.id,
+        created_by_user_id=admin.id,
+        title="Python Score Summary Demo Rubric",
+        slug="python-score-summary-demo",
+        description="Synthetic local-development rubric for the public Python score summary fixture.",
+        draft_schema=draft_schema,
+        metadata_payload={"fixture": "python_score_summary", "subject_agnostic": True},
+    )
+    publish_rubric_version(
+        db,
+        rubric=rubric,
+        published_by_user_id=admin.id,
+        source_metadata={"source": "seed_dev", "fixture": "python_score_summary"},
+    )
+
+
 def seed_development_data() -> None:
     settings = get_settings()
     if settings.is_production:
@@ -230,13 +329,14 @@ def seed_development_data() -> None:
 
     with SessionLocal() as db:
         organization = _get_or_create_organization(db)
-        _get_or_create_admin(db, organization)
+        admin = _get_or_create_admin(db, organization)
         _seed_assessment_types(db, organization)
         _seed_evidence_types(db, organization)
         _seed_output_types(db, organization)
         _seed_rubric_types(db, organization)
         _seed_file_purposes(db, organization)
         _seed_subject_pack(db, organization)
+        _seed_demo_rubric(db, organization, admin)
         db.commit()
 
 

@@ -1,0 +1,59 @@
+[project]
+name = "rubricore-ste"
+version = "0.1.0"
+description = "Python-first assessment core for rubric-driven grading, review, and auditability."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.13,<2.0",
+    "psycopg[binary]>=3.1,<4.0",
+    "pydantic-settings>=2.2,<3.0",
+    "SQLAlchemy>=2.0,<3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=3.7,<5.0",
+    "pyright[nodejs]>=1.1.380,<2.0",
+    "pytest>=8.2,<9.0",
+    "ruff>=0.6.0,<1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["app", "scripts", "tests"]
+extend-exclude = [
+    "alembic/versions",
+    "tests/fixtures",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
+ignore = [
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/env.py" = ["E402"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+include = ["app", "scripts", "tests", "alembic/env.py"]
+exclude = [
+    ".venv",
+    "**/__pycache__",
+    "alembic/versions",
+    "tests/fixtures",
+]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
+reportAttributeAccessIssue = false
+reportCallIssue = false

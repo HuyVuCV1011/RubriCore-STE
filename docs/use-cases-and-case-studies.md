@@ -40,9 +40,13 @@ RubriCore-STE should help teachers build better grading systems over time, but i
 | Review changes a grade or feedback | Store previous value, new value, actor, and reason |
 | A file cannot be parsed | Preserve the artifact and route to manual handling when needed |
 
-## Capability Map
+## Concise Use Cases
 
-### Assessment Authoring
+These use cases describe the main capabilities RubriCore-STE should support.
+
+### Capability Map
+
+#### Assessment Authoring
 
 Teachers and admins should be able to create assessments without hard-coding a subject into the core system.
 
@@ -53,7 +57,7 @@ Teachers and admins should be able to create assessments without hard-coding a s
 | Subject packs | Data, Programming, Math, Physics, Art, or future discipline packs |
 | Publishing controls | Draft state, compatibility validation, publish action, archive without deleting history |
 
-### Knowledge Library
+#### Knowledge Library
 
 The knowledge library is where teacher-added material becomes reusable grading knowledge.
 
@@ -66,7 +70,7 @@ The knowledge library is where teacher-added material becomes reusable grading k
 | Approve suggestions | Accepted suggestions enter drafts only; publishing still requires normal rubric versioning |
 | Preserve provenance | Show source citations, access scope, and recommendation history |
 
-### Rubrics and Answer Keys
+#### Rubrics and Answer Keys
 
 Rubrics and answer keys should be editable while in draft, immutable once published, and explicit when revised.
 
@@ -77,7 +81,7 @@ Rubrics and answer keys should be editable while in draft, immutable once publis
 | Answer keys | Exact match, numeric tolerance, accepted text variants, regex matching, reference solution files |
 | Versioning | Publish immutable versions, create new versions after edits, trigger regrade when a new version is selected |
 
-### Submission and Evidence Intake
+#### Submission and Evidence Intake
 
 The system should treat every file as an artifact before trying to interpret it.
 
@@ -89,7 +93,7 @@ The system should treat every file as an artifact before trying to interpret it.
 | Images, audio, video, archives | Store metadata and route through supported adapters or review |
 | Unknown formats | Preserve artifact, mark unsupported, and avoid silent failure |
 
-### Grading, Review, and Audit
+#### Grading, Review, and Audit
 
 ```mermaid
 flowchart TD
@@ -109,7 +113,9 @@ flowchart TD
     K --> L
 ```
 
-## Case Studies
+## Step-by-Step Case Studies
+
+These case studies show how the concise use cases fit together in practical teaching, grading, review, and audit workflows.
 
 ### Case Study 1: Teacher Creates a Short-Answer Assessment
 
