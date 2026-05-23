@@ -351,6 +351,7 @@ def create_knowledge_chunks(
     knowledge_source: KnowledgeSource,
     markdown_content: str,
     max_characters: int = 1200,
+    replace_existing: bool = False,
     actor_user_id: uuid.UUID | None = None,
     actor_source: str = "system",
     reason: str | None = None,
@@ -359,8 +360,32 @@ def create_knowledge_chunks(
     if knowledge_source.conversion_status != "converted" or knowledge_source.converted_markdown_artifact_id is None:
         raise KnowledgeLibraryError("Knowledge source must have converted Markdown before chunking.")
 
+    drafts = build_markdown_chunk_drafts(markdown_content, max_characters=max_characters)
+    existing_chunks = list(
+        db.scalars(
+            select(KnowledgeChunk)
+            .where(
+                KnowledgeChunk.knowledge_source_id == knowledge_source.id,
+                KnowledgeChunk.status == "active",
+            )
+            .order_by(KnowledgeChunk.position)
+        )
+    )
+    if existing_chunks:
+        existing_hashes = [chunk.content_hash for chunk in existing_chunks]
+        draft_hashes = [draft.content_hash for draft in drafts]
+        if existing_hashes == draft_hashes:
+            return existing_chunks
+        if not replace_existing:
+            raise KnowledgeLibraryError(
+                "Knowledge source already has active chunks with different content; use replace_existing=True."
+            )
+        for chunk in existing_chunks:
+            chunk.status = "superseded"
+        db.flush()
+
     chunks: list[KnowledgeChunk] = []
-    for draft in build_markdown_chunk_drafts(markdown_content, max_characters=max_characters):
+    for draft in drafts:
         chunk = KnowledgeChunk(
             organization_id=knowledge_source.organization_id,
             knowledge_source_id=knowledge_source.id,
@@ -391,6 +416,7 @@ def create_knowledge_chunks(
             "knowledge_source_id": str(knowledge_source.id),
             "chunk_count": len(chunks),
             "chunk_ids": [str(chunk.id) for chunk in chunks],
+            "replaced_chunk_ids": [str(chunk.id) for chunk in existing_chunks] if replace_existing else [],
         },
         reason=reason,
         request_id=request_id,

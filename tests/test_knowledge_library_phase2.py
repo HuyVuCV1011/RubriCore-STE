@@ -18,6 +18,7 @@ class RecordingSession:
         self.added: list[object] = []
         self.flush_count = 0
         self.scalar_results = list(scalar_results or [])
+        self.scalars_results: list[object] = []
 
     def add(self, record: object) -> None:
         self.added.append(record)
@@ -32,6 +33,9 @@ class RecordingSession:
         if not self.scalar_results:
             return None
         return self.scalar_results.pop(0)
+
+    def scalars(self, _: object) -> list[object]:
+        return self.scalars_results
 
 
 def file_purpose(key: str) -> FilePurpose:
@@ -196,3 +200,93 @@ def test_create_knowledge_chunks_records_active_chunks_and_audit() -> None:
     assert chunks[0].status == "active"
     assert chunks[0].heading_path == ["Notes"]
     assert records(session, AuditEvent)[0].action == "knowledge_chunks.created"
+
+
+def test_create_knowledge_chunks_returns_existing_chunks_for_same_content() -> None:
+    source = KnowledgeSource(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        source_file_artifact_id=uuid.uuid4(),
+        converted_markdown_artifact_id=uuid.uuid4(),
+        title="Teacher Notes",
+        access_scope="public_safe",
+        conversion_status="converted",
+        status="active",
+        metadata_payload={},
+    )
+    content = "# Notes\n\nInclude threshold equality."
+    draft = build_markdown_chunk_drafts(content)[0]
+    existing = KnowledgeChunk(
+        id=uuid.uuid4(),
+        organization_id=source.organization_id,
+        knowledge_source_id=source.id,
+        converted_markdown_artifact_id=source.converted_markdown_artifact_id,
+        position=draft.position,
+        chunk_key=draft.chunk_key,
+        heading_path=draft.heading_path,
+        content=draft.content,
+        content_hash=draft.content_hash,
+        character_count=draft.character_count,
+        status="active",
+        metadata_payload={},
+    )
+    session = RecordingSession()
+    session.scalars_results = [existing]
+
+    chunks = create_knowledge_chunks(
+        session,  # type: ignore[arg-type]
+        knowledge_source=source,
+        markdown_content=content,
+    )
+
+    assert chunks == [existing]
+    assert records(session, KnowledgeChunk) == []
+    assert records(session, AuditEvent) == []
+
+
+def test_create_knowledge_chunks_requires_explicit_replace_for_changed_content() -> None:
+    source = KnowledgeSource(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        source_file_artifact_id=uuid.uuid4(),
+        converted_markdown_artifact_id=uuid.uuid4(),
+        title="Teacher Notes",
+        access_scope="public_safe",
+        conversion_status="converted",
+        status="active",
+        metadata_payload={},
+    )
+    existing = KnowledgeChunk(
+        id=uuid.uuid4(),
+        organization_id=source.organization_id,
+        knowledge_source_id=source.id,
+        converted_markdown_artifact_id=source.converted_markdown_artifact_id,
+        position=0,
+        chunk_key="chunk-0000",
+        heading_path=["Notes"],
+        content="old",
+        content_hash="old-hash",
+        character_count=3,
+        status="active",
+        metadata_payload={},
+    )
+    session = RecordingSession()
+    session.scalars_results = [existing]
+
+    with pytest.raises(KnowledgeLibraryError, match="replace_existing"):
+        create_knowledge_chunks(
+            session,  # type: ignore[arg-type]
+            knowledge_source=source,
+            markdown_content="# Notes\n\nNew content.",
+        )
+
+    chunks = create_knowledge_chunks(
+        session,  # type: ignore[arg-type]
+        knowledge_source=source,
+        markdown_content="# Notes\n\nNew content.",
+        replace_existing=True,
+    )
+
+    assert existing.status == "superseded"
+    assert len(chunks) == 1
+    assert chunks[0].content_hash != "old-hash"

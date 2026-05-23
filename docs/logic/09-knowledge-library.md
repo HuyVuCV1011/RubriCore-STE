@@ -75,6 +75,8 @@ The chunking helper:
 - stores content hashes
 - tracks character counts
 - preserves content text for retrieval and citations
+- returns existing active chunks when the same source version is chunked again with identical content
+- requires explicit replacement before superseding active chunks with changed content
 
 Chunks are available for retrieval only when active. Unsupported sources do not produce chunks.
 
