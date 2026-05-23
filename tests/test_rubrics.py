@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from app.db.models import (
+    AuditEvent,
     PerformanceLevel,
     Rubric,
     RubricBinding,
@@ -19,6 +20,7 @@ from app.db.services.rubrics import (
     create_rubric,
     ordered_criteria,
     ordered_performance_levels,
+    publish_rubric_version,
     update_published_rubric_version,
     validate_rubric_schema,
 )
@@ -35,6 +37,9 @@ class RecordingSession:
 
     def flush(self) -> None:
         self.flush_count += 1
+        for record in self.added:
+            if hasattr(record, "id") and record.id is None:
+                record.id = uuid.uuid4()
 
     def get(self, _: object, __: object) -> object | None:
         return self.get_result
@@ -118,8 +123,45 @@ def test_rubric_creation_validates_and_records_a_draft() -> None:
     assert rubric.slug == "python-score-summary"
     assert rubric.status == "draft"
     assert rubric.metadata_payload == {"subject_agnostic": True}
-    assert session.added == [rubric]
+    audit_events = [record for record in session.added if isinstance(record, AuditEvent)]
+    assert [record for record in session.added if isinstance(record, Rubric)] == [rubric]
+    assert audit_events[0].action == "rubric.created"
+    assert audit_events[0].entity_type == "rubric"
+    assert audit_events[0].entity_id == rubric.id
+    assert audit_events[0].new_state["status"] == "draft"
     assert session.flush_count == 1
+
+
+def test_publish_rubric_version_records_audit_event() -> None:
+    rubric = Rubric(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        rubric_type_id=uuid.uuid4(),
+        title="Python Score Summary",
+        slug="python-score-summary",
+        status="draft",
+        draft_schema=rubric_schema(),
+    )
+    publisher_id = uuid.uuid4()
+    session = RecordingSession()
+
+    version = publish_rubric_version(
+        session,  # type: ignore[arg-type]
+        rubric=rubric,
+        published_by_user_id=publisher_id,
+        source_metadata={"source": "unit_test"},
+        request_id="req-publish-rubric",
+    )
+
+    audit_events = [record for record in session.added if isinstance(record, AuditEvent)]
+    assert version.version_number == 1
+    assert rubric.latest_version_number == 1
+    assert audit_events[0].action == "rubric_version.published"
+    assert audit_events[0].entity_type == "rubric_version"
+    assert audit_events[0].entity_id == version.id
+    assert audit_events[0].actor_user_id == publisher_id
+    assert audit_events[0].request_id == "req-publish-rubric"
+    assert audit_events[0].new_state["criteria"] == ["correctness", "clarity"]
 
 
 def test_published_rubric_versions_are_not_silently_mutable() -> None:
@@ -147,7 +189,7 @@ def test_descriptor_completeness_is_required() -> None:
         validate_rubric_schema(schema)
 
 
-def test_bind_rubric_version_to_evaluation_context_records_audit_metadata() -> None:
+def test_bind_rubric_version_to_evaluation_context_records_audit_event() -> None:
     version = RubricVersion(
         id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
@@ -168,6 +210,8 @@ def test_bind_rubric_version_to_evaluation_context_records_audit_metadata() -> N
         external_context_key="fixture:python-score-summary",
         source="fixture_import",
         metadata_payload={"reason": "synthetic fixture"},
+        reason="synthetic fixture",
+        request_id="req-bind-rubric",
     )
 
     assert binding.rubric_version_id == version.id
@@ -175,7 +219,15 @@ def test_bind_rubric_version_to_evaluation_context_records_audit_metadata() -> N
     assert binding.external_context_key == "fixture:python-score-summary"
     assert binding.source == "fixture_import"
     assert binding.metadata_payload == {"reason": "synthetic fixture"}
-    assert session.added == [binding]
+    audit_events = [record for record in session.added if isinstance(record, AuditEvent)]
+    assert [record for record in session.added if isinstance(record, RubricBinding)] == [binding]
+    assert audit_events[0].action == "rubric_binding.created"
+    assert audit_events[0].entity_type == "rubric_binding"
+    assert audit_events[0].entity_id == binding.id
+    assert audit_events[0].actor_source == "fixture_import"
+    assert audit_events[0].reason == "synthetic fixture"
+    assert audit_events[0].request_id == "req-bind-rubric"
+    assert audit_events[0].new_state["external_context_key"] == "fixture:python-score-summary"
     assert session.flush_count == 1
 
 

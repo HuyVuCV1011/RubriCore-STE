@@ -45,9 +45,17 @@ Most grading systems become brittle when work is open-ended, cross-disciplinary,
 | Model-only decisions | Validated outputs, confidence routing, and audit events |
 | Rewriting history | New runs, superseded results, and review records |
 
-## Current Backend Slice
+## Phase 1 Status
 
-This repository is in early Phase 1 development. The current public backend foundation includes:
+Phase 1 is complete as a backend core. The repository now has the durable schema, service logic, public docs, fixtures, and tests needed to prove the central grading workflow.
+
+RubriCore-STE can now create and preserve versioned grading context, accept immutable submitted evidence, run deterministic grading, optionally validate AI-assisted suggestions, route uncertain results to teacher review, finalize or override results, request regrades, and preserve an audit trail.
+
+This is not yet a production application or user-facing grading UI. Later phases should add API/UI surfaces, production auth and permissions, full answer-key authoring, reporting, deployment, and real provider integrations.
+
+## Current Backend Foundation
+
+The current public backend foundation includes:
 
 | Area | Implemented shape |
 | --- | --- |
@@ -57,11 +65,10 @@ This repository is in early Phase 1 development. The current public backend foun
 | Answer lifecycle | Draft, submitted, superseded, withdrawn, and archived answer packages |
 | Evidence | Submission evidence records and artifact provenance model |
 | Grading orchestration | Run creation, deterministic scoring, optional AI interaction records, confidence routing, review tasks, and audit events |
-| Review | Review task, teacher review, and teacher override records |
+| Review | Review task, teacher review, teacher override, finalization, and return-for-regrade behavior |
+| Audit trail | Append-only audit records for major Phase 1 lifecycle, grading, review, and rubric-context actions |
 | Fixtures | Public-safe synthetic Python score-summary assignment fixture |
-| Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, and grading orchestration |
-
-The project is not yet a complete production application or user-facing grading UI.
+| Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, and audit events |
 
 ## Repository Map
 
@@ -99,6 +106,7 @@ The project is not yet a complete production application or user-facing grading 
 | [docs/logic/05-grading-orchestration.md](docs/logic/05-grading-orchestration.md) | Grading runs, deterministic-first execution, AI validation, confidence routing, and review tasks |
 | [docs/logic/06-confidence-policy.md](docs/logic/06-confidence-policy.md) | Confidence bands, routing gates, review escalation, and auditable policy payloads |
 | [docs/logic/07-review-policy.md](docs/logic/07-review-policy.md) | Teacher review decisions, overrides, regrade returns, finalization, and audit trail |
+| [docs/logic/08-audit-logging.md](docs/logic/08-audit-logging.md) | Append-only audit events, traceability coverage, and Phase 1 audit boundaries |
 
 ## Quick Start
 
@@ -197,11 +205,17 @@ flowchart TD
     J --> K
 ```
 
+## Repository Readiness
+
+Tracked files are intended to be public-safe: source code, migrations, setup files, public docs, and synthetic fixtures. Local caches, virtual environments, `.env`, private docs, private fixtures, local artifacts, and database dumps are ignored.
+
+The project uses the MIT License. Before a broader public release, consider adding a lightweight project-specific contribution policy.
+
 ## Roadmap
 
 | Horizon | Focus |
 | --- | --- |
-| Phase 1 | Core database foundation, deterministic grading, grading orchestration, review tasks, overrides, and audit trail |
+| Phase 1 | Complete: core database foundation, deterministic grading, grading orchestration, review tasks, overrides, and audit trail |
 | Phase 2 | Knowledge-library MVP, Markdown conversion, and teacher-approved rubric suggestions |
 | Phase 3 | Evaluation datasets, calibration, reliability metrics, and model/prompt regression testing |
 | Phase 4 | Provider routing, fallback policy, scale-out, and batch grading |
@@ -221,3 +235,7 @@ Do not commit real student work, private prompts, private rubrics, private knowl
 - keep teacher review visible and auditable
 - keep private data out of public docs and fixtures
 - prefer small, well-scoped changes that fit the existing architecture
+
+## License
+
+RubriCore-STE is licensed under the [MIT License](LICENSE).

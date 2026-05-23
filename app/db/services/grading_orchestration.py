@@ -364,7 +364,7 @@ def execute_grading_run(
             actor_user_id=actor_user_id,
             actor_source=actor_source,
             previous_state={},
-            new_state={"criterion_keys": sorted(deterministic_payload["criterion_scores"])},
+            new_state=_deterministic_audit_summary(deterministic_payload),
             request_id=request_id,
         )
 
@@ -771,6 +771,17 @@ def _invoke_and_validate_ai(
             evidence_reference_ids=_submission_evidence_reference_ids(submission),
         )
         interaction.validation_status = "valid"
+        _audit_grading_event(
+            db,
+            submission=submission,
+            grading_run=grading_run,
+            action="ai_interaction.completed",
+            actor_user_id=grading_run.triggered_by_user_id,
+            actor_source=grading_run.trigger_source,
+            previous_state={"validation_status": "pending"},
+            new_state=_ai_interaction_audit_summary(interaction, validated),
+            request_id=grading_run.context_payload.get("request_id"),
+        )
         return interaction, validated, None
     except AIOutputValidationError as exc:
         interaction.validation_status = "invalid"
@@ -795,6 +806,23 @@ def _invoke_and_validate_ai(
     except Exception as exc:
         interaction.validation_status = "failed"
         interaction.error_message = _safe_error(exc)
+        _audit_grading_event(
+            db,
+            submission=submission,
+            grading_run=grading_run,
+            action="ai_interaction.failed",
+            actor_user_id=grading_run.triggered_by_user_id,
+            actor_source=grading_run.trigger_source,
+            previous_state={"validation_status": "pending"},
+            new_state={
+                "ai_interaction_id": str(interaction.id),
+                "provider": interaction.provider,
+                "model": interaction.model,
+                "validation_status": interaction.validation_status,
+                "error": interaction.error_message,
+            },
+            request_id=grading_run.context_payload.get("request_id"),
+        )
         return interaction, None, _safe_error(exc)
 
 
@@ -1500,6 +1528,36 @@ def _submission_evidence_reference_ids(submission: Submission) -> set[str]:
         if evidence.evidence_extraction_id is not None:
             reference_ids.add(str(evidence.evidence_extraction_id))
     return reference_ids
+
+
+def _deterministic_audit_summary(deterministic_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "criterion_keys": sorted(deterministic_payload.get("criterion_scores", {})),
+        "selected_levels_by_criterion": copy.deepcopy(
+            deterministic_payload.get("selected_levels_by_criterion", {})
+        ),
+        "total_score": _json_safe(deterministic_payload.get("total_score")),
+        "max_score": _json_safe(deterministic_payload.get("max_score")),
+        "confidence": _json_safe(deterministic_payload.get("confidence")),
+        "confidence_band": deterministic_payload.get("confidence_band"),
+        "answer_key_findings": copy.deepcopy(deterministic_payload.get("answer_key_findings", [])),
+        "warnings": list(deterministic_payload.get("warnings", [])),
+    }
+
+
+def _ai_interaction_audit_summary(interaction: AIInteraction, ai_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ai_interaction_id": str(interaction.id),
+        "provider": interaction.provider,
+        "model": interaction.model,
+        "prompt_version": interaction.prompt_version,
+        "output_schema_version": interaction.output_schema_version,
+        "validation_status": interaction.validation_status,
+        "criterion_keys": sorted(
+            suggestion["criterion_key"] for suggestion in ai_payload.get("criterion_suggestions", [])
+        ),
+        "confidence": _json_safe(ai_payload.get("confidence")),
+    }
 
 
 def _audit_grading_event(

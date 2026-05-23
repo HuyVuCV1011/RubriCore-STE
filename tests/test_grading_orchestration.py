@@ -377,6 +377,15 @@ def test_high_confidence_deterministic_result_auto_finalizes_without_ai() -> Non
         "grading_result.auto_finalized",
         "grading_run.completed",
     ]
+    deterministic_audit = next(
+        event for event in records(session, AuditEvent) if event.action == "grading.deterministic_checks_completed"
+    )
+    assert deterministic_audit.new_state["selected_levels_by_criterion"] == {
+        "correctness": "meets",
+        "clarity": "partial",
+    }
+    assert deterministic_audit.new_state["total_score"] == "5"
+    assert deterministic_audit.new_state["max_score"] == "6"
 
 
 def test_ai_is_invoked_after_deterministic_stage_and_validation_is_recorded() -> None:
@@ -415,6 +424,11 @@ def test_ai_is_invoked_after_deterministic_stage_and_validation_is_recorded() ->
     assert outcome.grading_result is not None
     assert outcome.grading_result.status == "finalized"
     assert len(records(session, AIInteraction)) == 1
+    ai_audit = next(event for event in records(session, AuditEvent) if event.action == "ai_interaction.completed")
+    assert ai_audit.new_state["provider"] == "fake"
+    assert ai_audit.new_state["model"] == "fake-model"
+    assert ai_audit.new_state["validation_status"] == "valid"
+    assert ai_audit.new_state["criterion_keys"] == ["correctness"]
 
 
 def test_deterministic_ai_disagreement_routes_to_review() -> None:

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    AuditEvent,
     PerformanceLevel,
     Rubric,
     RubricBinding,
@@ -121,6 +122,9 @@ def create_rubric(
     slug: str | None = None,
     description: str | None = None,
     metadata_payload: dict[str, Any] | None = None,
+    actor_source: str = "teacher",
+    reason: str | None = None,
+    request_id: str | None = None,
 ) -> Rubric:
     validate_rubric_schema(draft_schema)
     rubric = Rubric(
@@ -136,6 +140,25 @@ def create_rubric(
     )
     db.add(rubric)
     db.flush()
+    _audit_rubric_event(
+        db,
+        organization_id=organization_id,
+        actor_user_id=created_by_user_id,
+        actor_source=actor_source,
+        action="rubric.created",
+        entity_type="rubric",
+        entity_id=rubric.id,
+        previous_state={},
+        new_state={
+            "id": str(rubric.id) if rubric.id is not None else None,
+            "title": rubric.title,
+            "slug": rubric.slug,
+            "status": rubric.status,
+            "rubric_type_id": str(rubric_type_id),
+        },
+        reason=reason,
+        request_id=request_id,
+    )
     return rubric
 
 
@@ -145,6 +168,9 @@ def publish_rubric_version(
     rubric: Rubric,
     published_by_user_id: UUID | None = None,
     source_metadata: dict[str, Any] | None = None,
+    actor_source: str = "teacher",
+    reason: str | None = None,
+    request_id: str | None = None,
 ) -> RubricVersion:
     validate_rubric_schema(rubric.draft_schema)
     next_version = (rubric.latest_version_number or 0) + 1
@@ -167,6 +193,32 @@ def publish_rubric_version(
     rubric.latest_version_number = next_version
     rubric.status = "published"
     db.flush()
+    _audit_rubric_event(
+        db,
+        organization_id=rubric.organization_id,
+        actor_user_id=published_by_user_id,
+        actor_source=actor_source,
+        action="rubric_version.published",
+        entity_type="rubric_version",
+        entity_id=version.id,
+        previous_state={
+            "rubric_id": str(rubric.id) if rubric.id is not None else None,
+            "latest_version_number": next_version - 1 if next_version > 1 else None,
+            "status": "draft" if next_version == 1 else "published",
+        },
+        new_state={
+            "rubric_id": str(rubric.id) if rubric.id is not None else None,
+            "rubric_version_id": str(version.id) if version.id is not None else None,
+            "version_number": version.version_number,
+            "status": version.status,
+            "schema_version": version.schema_version,
+            "criteria": [criterion["key"] for criterion in ordered_criteria(rubric_schema)],
+            "performance_levels": [level["key"] for level in ordered_performance_levels(rubric_schema)],
+            "source_metadata": copy.deepcopy(version.source_metadata),
+        },
+        reason=reason,
+        request_id=request_id,
+    )
     return version
 
 
@@ -186,6 +238,8 @@ def bind_rubric_version(
     bound_by_user_id: UUID | None = None,
     source: str = "teacher",
     metadata_payload: dict[str, Any] | None = None,
+    reason: str | None = None,
+    request_id: str | None = None,
 ) -> RubricBinding:
     if context_type == "assessment" and assessment_id is None:
         raise RubricValidationError("Assessment bindings require assessment_id.")
@@ -212,7 +266,62 @@ def bind_rubric_version(
     )
     db.add(binding)
     db.flush()
+    _audit_rubric_event(
+        db,
+        organization_id=organization_id,
+        assessment_id=assessment_id,
+        actor_user_id=bound_by_user_id,
+        actor_source=source,
+        action="rubric_binding.created",
+        entity_type="rubric_binding",
+        entity_id=binding.id,
+        previous_state={},
+        new_state={
+            "rubric_binding_id": str(binding.id) if binding.id is not None else None,
+            "rubric_version_id": str(rubric_version_id),
+            "context_type": context_type,
+            "assessment_id": str(assessment_id) if assessment_id is not None else None,
+            "assessment_item_id": str(assessment_item_id) if assessment_item_id is not None else None,
+            "external_context_key": external_context_key,
+            "status": binding.status,
+            "source": source,
+        },
+        reason=reason,
+        request_id=request_id,
+    )
     return binding
+
+
+def _audit_rubric_event(
+    db: Session,
+    *,
+    organization_id: UUID,
+    action: str,
+    entity_type: str,
+    entity_id: UUID | None,
+    actor_user_id: UUID | None,
+    actor_source: str,
+    previous_state: dict[str, Any],
+    new_state: dict[str, Any],
+    assessment_id: UUID | None = None,
+    reason: str | None = None,
+    request_id: str | None = None,
+) -> AuditEvent:
+    event = AuditEvent(
+        organization_id=organization_id,
+        assessment_id=assessment_id,
+        actor_user_id=actor_user_id,
+        actor_source=actor_source,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        request_id=request_id,
+        previous_state=copy.deepcopy(previous_state),
+        new_state=copy.deepcopy(new_state),
+        reason=reason,
+    )
+    db.add(event)
+    return event
 
 
 def calculate_deterministic_score(

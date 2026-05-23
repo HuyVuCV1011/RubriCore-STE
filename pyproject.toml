@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Python-first assessment core for rubric-driven grading, review, and auditability."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
 dependencies = [
     "alembic>=1.13,<2.0",
     "psycopg[binary]>=3.1,<4.0",
