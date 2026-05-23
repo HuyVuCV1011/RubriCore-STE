@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
 
+from sqlalchemy import select
+
 from app.db.models import AuditEvent, GradingResult, GradingRun, Submission, SubmissionEvidence
 
 
@@ -48,6 +50,8 @@ class LifecycleSession(Protocol):
     def flush(self) -> None: ...
 
     def get(self, entity: object, ident: object) -> object | None: ...
+
+    def execute(self, statement: object) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,13 @@ def submit_submission(
     _validate_submission_context(submission)
     _validate_submission_evidence(submission)
 
+    previous_package = superseded_submission or _load_superseded_package(db, submission)
+    _ensure_no_other_current_package(
+        db,
+        submission,
+        allowed_current_submission_id=previous_package.id if previous_package is not None else None,
+    )
+
     previous_state = _submission_state(submission)
     submission.status = SUBMISSION_SUBMITTED
     submission.submitted_at = _now()
@@ -183,7 +194,6 @@ def submit_submission(
         request_id=request_id,
     )
 
-    previous_package = superseded_submission or _load_superseded_package(db, submission)
     if previous_package is not None:
         supersede_submission_package(
             db,
@@ -431,6 +441,8 @@ def supersede_grading_result(
         action="grading_result.superseded",
         actor_user_id=actor_user_id,
         actor_source=actor_source,
+        entity_type="grading_result",
+        entity_id=previous_result.id,
         previous_state=previous_state,
         new_state={
             "status": previous_result.status,
@@ -510,6 +522,38 @@ def _load_superseded_package(db: LifecycleSession, submission: Submission) -> Su
     return package
 
 
+def _ensure_no_other_current_package(
+    db: LifecycleSession,
+    submission: Submission,
+    *,
+    allowed_current_submission_id: UUID | None,
+) -> None:
+    statement = (
+        select(Submission)
+        .where(Submission.organization_id == submission.organization_id)
+        .where(Submission.learner_id == submission.learner_id)
+        .where(Submission.status == SUBMISSION_SUBMITTED)
+        .where(Submission.id != submission.id)
+    )
+    if submission.assessment_id is None:
+        statement = statement.where(Submission.assessment_id.is_(None))
+    else:
+        statement = statement.where(Submission.assessment_id == submission.assessment_id)
+    if submission.assessment_item_id is None:
+        statement = statement.where(Submission.assessment_item_id.is_(None))
+    else:
+        statement = statement.where(Submission.assessment_item_id == submission.assessment_item_id)
+
+    existing = db.execute(statement).scalars().first()
+    if existing is None:
+        return
+    if not isinstance(existing, Submission):
+        raise AnswerLifecycleError("Current package lookup returned an unexpected record type.")
+    if allowed_current_submission_id is not None and existing.id == allowed_current_submission_id:
+        return
+    raise AnswerLifecycleError("A current submitted answer package already exists for this learner and context.")
+
+
 def _audit_submission_event(
     db: LifecycleSession,
     *,
@@ -519,6 +563,8 @@ def _audit_submission_event(
     actor_source: str,
     previous_state: dict[str, Any],
     new_state: dict[str, Any],
+    entity_type: str = "submission",
+    entity_id: UUID | None = None,
     reason: str | None = None,
     request_id: str | None = None,
     job_id: str | None = None,
@@ -532,8 +578,8 @@ def _audit_submission_event(
         actor_user_id=actor_user_id,
         actor_source=actor_source,
         action=action,
-        entity_type="submission",
-        entity_id=submission.id,
+        entity_type=entity_type,
+        entity_id=entity_id if entity_id is not None else submission.id,
         request_id=request_id,
         job_id=job_id,
         previous_state=copy.deepcopy(previous_state),

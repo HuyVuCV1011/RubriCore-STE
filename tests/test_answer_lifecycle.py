@@ -9,30 +9,52 @@ from app.db.services.answer_lifecycle import (
     SubmissionImmutableError,
     SubmissionIntakeError,
     add_submission_evidence,
+    archive_submission,
     create_draft_submission,
     request_learner_revision,
     request_regrade,
     submit_submission,
     supersede_grading_result,
+    supersede_submission_package,
     validate_submission_ready_for_grading,
+    withdraw_submission,
 )
 
 
 class RecordingSession:
-    def __init__(self, get_result: object | None = None) -> None:
+    def __init__(self, get_result: object | None = None, current_package: object | None = None) -> None:
         self.added: list[object] = []
         self.flush_count = 0
         self.get_result = get_result
+        self.current_package = current_package
 
     def add(self, record: object) -> None:
         self.added.append(record)
 
     def flush(self) -> None:
         self.flush_count += 1
+        for record in self.added:
+            if hasattr(record, "id") and record.id is None:
+                record.id = uuid.uuid4()
 
     def get(self, entity: object, ident: object) -> object | None:
         _ = (entity, ident)
         return self.get_result
+
+    def execute(self, statement: object) -> object:
+        _ = statement
+        return ScalarResultEnvelope(self.current_package)
+
+
+class ScalarResultEnvelope:
+    def __init__(self, record: object | None) -> None:
+        self.record = record
+
+    def scalars(self) -> "ScalarResultEnvelope":
+        return self
+
+    def first(self) -> object | None:
+        return self.record
 
 
 def make_submission(*, status: str = "draft", evidence_count: int = 1) -> Submission:
@@ -193,6 +215,22 @@ def test_submitting_revision_supersedes_original_package() -> None:
     assert "submission.superseded" in [event.action for event in audit_events(session)]
 
 
+def test_submit_blocks_second_current_package_for_same_context() -> None:
+    current = make_submission(status="submitted")
+    duplicate = make_submission(status="draft")
+    duplicate.organization_id = current.organization_id
+    duplicate.learner_id = current.learner_id
+    duplicate.assessment_id = current.assessment_id
+    duplicate.assessment_item_id = current.assessment_item_id
+    session = RecordingSession(current_package=current)
+
+    with pytest.raises(AnswerLifecycleError, match="current submitted answer package already exists"):
+        submit_submission(session, submission=duplicate, actor_source="learner")  # type: ignore[arg-type]
+
+    assert duplicate.status == "draft"
+    assert audit_events(session) == []
+
+
 def test_invalid_transition_back_to_draft_is_rejected() -> None:
     submission = make_submission(status="submitted")
 
@@ -280,4 +318,168 @@ def test_supersede_grading_result_marks_only_prior_result_superseded() -> None:
 
     assert previous.status == "superseded"
     assert replacement.status == "proposed"
-    assert audit_events(session)[0].action == "grading_result.superseded"
+    event = audit_events(session)[0]
+    assert event.action == "grading_result.superseded"
+    assert event.entity_type == "grading_result"
+    assert event.entity_id == previous.id
+    assert event.submission_id == submission.id
+
+
+def test_text_response_exercise_revises_by_creating_new_package() -> None:
+    session = RecordingSession()
+    organization_id = uuid.uuid4()
+    learner_id = uuid.uuid4()
+    assessment_item_id = uuid.uuid4()
+    evidence_type_id = uuid.uuid4()
+    initial_answer = "Deterministic checks are useful because they are simple."
+    revised_answer = (
+        "Deterministic validation should run before AI-assisted grading because it catches missing evidence, "
+        "malformed data, and clear objective matches in a repeatable way."
+    )
+
+    original = create_draft_submission(
+        session,  # type: ignore[arg-type]
+        organization_id=organization_id,
+        learner_id=learner_id,
+        assessment_item_id=assessment_item_id,
+        actor_source="teacher",
+        metadata_payload={"exercise": "short_response", "profile": "needs_revision"},
+    )
+    add_submission_evidence(  # type: ignore[arg-type]
+        session,
+        submission=original,
+        evidence_type_id=evidence_type_id,
+        raw_text=initial_answer,
+        actor_source="learner",
+    )
+    original.evidence = [record for record in session.added if isinstance(record, SubmissionEvidence)]
+
+    submit_submission(session, submission=original, actor_source="learner")  # type: ignore[arg-type]
+
+    revision = request_learner_revision(  # type: ignore[arg-type]
+        session,
+        submission=original,
+        actor_source="teacher",
+        reason="Initial answer needs more concrete validation detail.",
+        metadata_payload={"exercise": "short_response", "profile": "revised_valid"},
+    )
+    add_submission_evidence(  # type: ignore[arg-type]
+        session,
+        submission=revision,
+        evidence_type_id=evidence_type_id,
+        raw_text=revised_answer,
+        actor_source="learner",
+    )
+    revision.evidence = [
+        record
+        for record in session.added
+        if isinstance(record, SubmissionEvidence) and record.submission_id == revision.id
+    ]
+
+    submit_submission(
+        session,  # type: ignore[arg-type]
+        submission=revision,
+        actor_source="learner",
+        superseded_submission=original,
+    )
+
+    assert original.status == "superseded"
+    assert revision.status == "submitted"
+    assert revision.supersedes_submission_id == original.id
+    assert original.superseded_by_submission_id == revision.id
+    assert original.evidence[0].raw_text == initial_answer
+    assert revision.evidence[0].raw_text == revised_answer
+    assert validate_submission_ready_for_grading(revision, rubric_version_id=uuid.uuid4()).evidence_count == 1
+    assert "submission.superseded" in [event.action for event in audit_events(session)]
+
+
+def test_revision_request_requires_submitted_package_and_reason() -> None:
+    draft = make_submission(status="draft")
+    submitted = make_submission(status="submitted")
+
+    with pytest.raises(AnswerLifecycleError, match="submitted packages"):
+        request_learner_revision(  # type: ignore[arg-type]
+            RecordingSession(),
+            submission=draft,
+            actor_source="teacher",
+            reason="Needs revision.",
+        )
+
+    with pytest.raises(AnswerLifecycleError, match="require a reason"):
+        request_learner_revision(  # type: ignore[arg-type]
+            RecordingSession(),
+            submission=submitted,
+            actor_source="teacher",
+            reason=" ",
+        )
+
+
+def test_regrade_requires_submitted_package_and_reason() -> None:
+    draft = make_submission(status="draft")
+    submitted = make_submission(status="submitted")
+
+    with pytest.raises(AnswerLifecycleError, match="submitted immutable"):
+        request_regrade(  # type: ignore[arg-type]
+            RecordingSession(),
+            submission=draft,
+            reason="Rubric version changed.",
+        )
+
+    with pytest.raises(AnswerLifecycleError, match="require a reason"):
+        request_regrade(  # type: ignore[arg-type]
+            RecordingSession(),
+            submission=submitted,
+            reason=" ",
+        )
+
+
+def test_superseding_requires_matching_context_and_submitted_replacement() -> None:
+    original = make_submission(status="submitted")
+    replacement = make_submission(status="draft")
+    replacement.organization_id = original.organization_id
+    replacement.learner_id = original.learner_id
+    replacement.assessment_id = original.assessment_id
+    replacement.assessment_item_id = original.assessment_item_id
+
+    with pytest.raises(AnswerLifecycleError, match="must be submitted"):
+        supersede_submission_package(  # type: ignore[arg-type]
+            RecordingSession(),
+            previous_submission=original,
+            replacement_submission=replacement,
+        )
+
+    replacement.status = "submitted"
+    replacement.learner_id = uuid.uuid4()
+    with pytest.raises(AnswerLifecycleError, match="same learner"):
+        supersede_submission_package(  # type: ignore[arg-type]
+            RecordingSession(),
+            previous_submission=original,
+            replacement_submission=replacement,
+        )
+
+
+def test_withdraw_and_archive_create_audit_events() -> None:
+    withdrawn_session = RecordingSession()
+    draft = make_submission(status="draft")
+
+    withdraw_submission(  # type: ignore[arg-type]
+        withdrawn_session,
+        submission=draft,
+        actor_source="teacher",
+        reason="Imported draft was cancelled.",
+    )
+
+    assert draft.status == "withdrawn"
+    assert audit_events(withdrawn_session)[0].action == "submission.withdrawn"
+
+    archived_session = RecordingSession()
+    submitted = make_submission(status="submitted")
+    archive_submission(  # type: ignore[arg-type]
+        archived_session,
+        submission=submitted,
+        actor_source="admin",
+        reason="Assessment closed.",
+    )
+
+    assert submitted.status == "archived"
+    assert audit_events(archived_session)[0].action == "submission.archived"

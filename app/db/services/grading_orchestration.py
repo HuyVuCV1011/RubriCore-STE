@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
+
+from sqlalchemy import select
 
 from app.db.models import (
     AIInteraction,
@@ -15,7 +18,7 @@ from app.db.models import (
     ReviewTask,
     Submission,
 )
-from app.db.models.rubric import AnswerKeyVersion, RubricVersion
+from app.db.models.rubric import AnswerKey, AnswerKeyVersion, RubricBinding, RubricVersion
 from app.db.services.answer_lifecycle import SubmissionIntakeError, validate_submission_ready_for_grading
 from app.db.services.rubrics import RubricValidationError, calculate_deterministic_score
 
@@ -49,6 +52,7 @@ REASON_MANDATORY_REVIEW_POLICY = "mandatory_review_policy"
 REASON_PARTIAL_GRADING = "partial_grading"
 REASON_RUBRIC_COVERAGE_INCOMPLETE = "rubric_coverage_incomplete"
 REASON_AUTO_FINALIZE_DISABLED = "auto_finalize_disabled"
+REASON_ANSWER_KEY_NO_RULES = "answer_key_no_rules"
 
 
 class GradingOrchestrationError(ValueError):
@@ -63,6 +67,10 @@ class GradingSession(Protocol):
     def add(self, record: object) -> None: ...
 
     def flush(self) -> None: ...
+
+    def get(self, entity: object, ident: object) -> object | None: ...
+
+    def scalar(self, statement: object) -> object | None: ...
 
 
 class AIGradingProvider(Protocol):
@@ -103,6 +111,100 @@ class ConfidencePolicyDecision:
     retryable: bool
     reviewer_summary: str
     payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ResolvedGradingContext:
+    rubric_version: RubricVersion
+    answer_key_version: AnswerKeyVersion | None
+    context_payload: dict[str, Any]
+
+
+def resolve_grading_context(
+    db: GradingSession,
+    *,
+    submission: Submission,
+    rubric_version: RubricVersion | None = None,
+    answer_key_version: AnswerKeyVersion | None = None,
+    answer_key_required: bool = False,
+) -> ResolvedGradingContext:
+    resolved_rubric = rubric_version
+    rubric_binding: RubricBinding | None = None
+    rubric_selection_source = "explicit" if rubric_version is not None else None
+
+    if resolved_rubric is None:
+        rubric_binding, rubric_selection_source = _resolve_active_rubric_binding(db, submission=submission)
+        if rubric_binding is not None:
+            resolved_rubric = _rubric_version_from_binding(db, rubric_binding)
+
+    if resolved_rubric is None:
+        raise GradingOrchestrationError(
+            "A published rubric version or active rubric binding is required before grading."
+        )
+    _validate_published_rubric_version(submission, resolved_rubric)
+
+    resolved_answer_key = answer_key_version
+    answer_key_selection_source = "explicit" if answer_key_version is not None else None
+    if resolved_answer_key is None and answer_key_required:
+        resolved_answer_key = _resolve_latest_published_answer_key_version(db, submission=submission)
+        answer_key_selection_source = "assessment_item_latest_published" if resolved_answer_key is not None else None
+
+    if answer_key_required or resolved_answer_key is not None:
+        _validate_published_answer_key_version(submission, resolved_answer_key)
+
+    return ResolvedGradingContext(
+        rubric_version=resolved_rubric,
+        answer_key_version=resolved_answer_key,
+        context_payload={
+            "rubric_selection_source": rubric_selection_source,
+            "rubric_binding_id": str(rubric_binding.id) if rubric_binding is not None else None,
+            "answer_key_selection_source": answer_key_selection_source,
+        },
+    )
+
+
+def orchestrate_grading_for_submission(
+    db: GradingSession,
+    *,
+    submission: Submission,
+    rubric_version: RubricVersion | None = None,
+    answer_key_version: AnswerKeyVersion | None = None,
+    selected_levels_by_criterion: dict[str, str] | None = None,
+    ai_provider: AIGradingProvider | None = None,
+    answer_key_required: bool = False,
+    policy: GradingPolicy | None = None,
+    triggered_by_user_id: UUID | None = None,
+    trigger_source: str = "system",
+    reason: str | None = None,
+    request_id: str | None = None,
+    context_payload: dict[str, Any] | None = None,
+) -> OrchestrationResult:
+    resolved_context = resolve_grading_context(
+        db,
+        submission=submission,
+        rubric_version=rubric_version,
+        answer_key_version=answer_key_version,
+        answer_key_required=answer_key_required,
+    )
+    merged_context_payload = {
+        **copy.deepcopy(context_payload or {}),
+        **copy.deepcopy(resolved_context.context_payload),
+    }
+    return orchestrate_grading(
+        db,
+        submission=submission,
+        rubric_version=resolved_context.rubric_version,
+        answer_key_version=resolved_context.answer_key_version,
+        selected_levels_by_criterion=selected_levels_by_criterion,
+        ai_provider=ai_provider,
+        answer_key_required=answer_key_required,
+        policy=policy,
+        triggered_by_user_id=triggered_by_user_id,
+        trigger_source=trigger_source,
+        reason=reason,
+        request_id=request_id,
+        context_payload=merged_context_payload,
+    )
 
 
 def start_grading_run(
@@ -249,7 +351,9 @@ def execute_grading_run(
     ai_interaction: AIInteraction | None = None
     try:
         deterministic_payload = _run_deterministic_stage(
+            submission=submission,
             rubric_version=rubric_version,
+            answer_key_version=answer_key_version,
             selected_levels_by_criterion=selected_levels_by_criterion or {},
         )
         _audit_grading_event(
@@ -386,31 +490,207 @@ def validate_ai_output(ai_output: dict[str, Any], *, rubric_version: RubricVersi
 
 def _run_deterministic_stage(
     *,
+    submission: Submission,
     rubric_version: RubricVersion,
+    answer_key_version: AnswerKeyVersion | None,
     selected_levels_by_criterion: dict[str, str],
 ) -> dict[str, Any]:
     required_criterion_keys = [criterion["key"] for criterion in rubric_version.rubric_schema.get("criteria", [])]
-    if not selected_levels_by_criterion:
+    answer_key_payload = _run_answer_key_checks(
+        submission=submission,
+        rubric_version=rubric_version,
+        answer_key_version=answer_key_version,
+    )
+    deterministic_levels = {
+        **answer_key_payload["selected_levels_by_criterion"],
+        **copy.deepcopy(selected_levels_by_criterion),
+    }
+    warnings = list(answer_key_payload["warnings"])
+    if not deterministic_levels:
         return {
+            "selected_levels_by_criterion": {},
             "criterion_scores": {},
             "total_score": None,
             "max_score": _max_score_from_rubric(rubric_version),
             "confidence": Decimal("0"),
             "confidence_band": CONFIDENCE_BLOCKED,
             "required_criterion_keys": required_criterion_keys,
-            "warnings": [REASON_PARTIAL_GRADING],
+            "answer_key_findings": answer_key_payload["findings"],
+            "warnings": _dedupe([*warnings, REASON_PARTIAL_GRADING]),
         }
-    summary = calculate_deterministic_score(rubric_version.rubric_schema, selected_levels_by_criterion)
+    summary = calculate_deterministic_score(rubric_version.rubric_schema, deterministic_levels)
     return {
-        "selected_levels_by_criterion": copy.deepcopy(selected_levels_by_criterion),
+        "selected_levels_by_criterion": copy.deepcopy(deterministic_levels),
         "criterion_scores": summary.criterion_scores,
         "total_score": summary.total_score,
         "max_score": summary.max_score,
         "confidence": Decimal("1"),
         "confidence_band": CONFIDENCE_HIGH,
         "required_criterion_keys": required_criterion_keys,
-        "warnings": [],
+        "answer_key_findings": answer_key_payload["findings"],
+        "manual_selected_levels_by_criterion": copy.deepcopy(selected_levels_by_criterion),
+        "warnings": warnings,
     }
+
+
+def _run_answer_key_checks(
+    *,
+    submission: Submission,
+    rubric_version: RubricVersion,
+    answer_key_version: AnswerKeyVersion | None,
+) -> dict[str, Any]:
+    if answer_key_version is None:
+        return {"selected_levels_by_criterion": {}, "findings": [], "warnings": []}
+
+    rules = _answer_key_rules(answer_key_version, rubric_version)
+    if not rules:
+        return {
+            "selected_levels_by_criterion": {},
+            "findings": [],
+            "warnings": [REASON_ANSWER_KEY_NO_RULES],
+        }
+
+    selected_levels: dict[str, str] = {}
+    findings: list[dict[str, Any]] = []
+    for index, rule in enumerate(rules):
+        finding = _evaluate_answer_key_rule(
+            submission=submission,
+            answer_key_version=answer_key_version,
+            rule=rule,
+            rule_index=index,
+        )
+        findings.append(finding)
+        selected_levels[finding["criterion_key"]] = finding["selected_level"]
+    return {"selected_levels_by_criterion": selected_levels, "findings": findings, "warnings": []}
+
+
+def _answer_key_rules(answer_key_version: AnswerKeyVersion, rubric_version: RubricVersion) -> list[dict[str, Any]]:
+    payload = answer_key_version.key_payload or {}
+    criteria = rubric_version.rubric_schema.get("criteria", [])
+    default_criterion_key = criteria[0]["key"] if criteria else None
+    if isinstance(payload.get("rules"), list):
+        return [
+            _normalize_answer_key_rule(rule, default_criterion_key=default_criterion_key)
+            for rule in payload["rules"]
+            if isinstance(rule, dict)
+        ]
+    if isinstance(payload.get("criteria"), dict):
+        return [
+            _normalize_answer_key_rule({**rule, "criterion_key": criterion_key}, default_criterion_key=criterion_key)
+            for criterion_key, rule in payload["criteria"].items()
+            if isinstance(rule, dict)
+        ]
+    if any(key in payload for key in ("accepted", "accepted_variants", "expected", "pattern")):
+        return [_normalize_answer_key_rule(payload, default_criterion_key=default_criterion_key)]
+    return []
+
+
+def _normalize_answer_key_rule(rule: dict[str, Any], *, default_criterion_key: str | None) -> dict[str, Any]:
+    normalized = copy.deepcopy(rule)
+    normalized.setdefault("criterion_key", default_criterion_key)
+    normalized.setdefault("rule_type", normalized.get("type") or _infer_answer_key_rule_type(normalized))
+    normalized.setdefault("correct_level", normalized.get("level_on_match") or "meets")
+    normalized.setdefault("incorrect_level", normalized.get("level_on_miss") or "needs_revision")
+    return normalized
+
+
+def _infer_answer_key_rule_type(rule: dict[str, Any]) -> str:
+    if "pattern" in rule:
+        return "regex"
+    if "tolerance" in rule:
+        return "numeric_tolerance"
+    if "numeric_value" in rule:
+        return "numeric_exact"
+    if "accepted_variants" in rule or "accepted" in rule:
+        return "accepted_variants"
+    return "exact_text"
+
+
+def _evaluate_answer_key_rule(
+    *,
+    submission: Submission,
+    answer_key_version: AnswerKeyVersion,
+    rule: dict[str, Any],
+    rule_index: int,
+) -> dict[str, Any]:
+    criterion_key = rule.get("criterion_key")
+    if not isinstance(criterion_key, str) or not criterion_key.strip():
+        raise GradingOrchestrationError("Answer key rule requires a criterion_key.")
+
+    observed_value = _answer_key_observed_value(submission, rule, criterion_key)
+    rule_type = str(rule.get("rule_type"))
+    matched = _answer_key_rule_matches(rule_type=rule_type, rule=rule, observed_value=observed_value)
+    selected_level = str(rule["correct_level"] if matched else rule["incorrect_level"])
+    return {
+        "answer_key_version_id": str(answer_key_version.id),
+        "rule_index": rule_index,
+        "criterion_key": criterion_key,
+        "rule_type": rule_type,
+        "observed_value": observed_value,
+        "matched": matched,
+        "selected_level": selected_level,
+        "explanation": _answer_key_explanation(rule_type=rule_type, matched=matched),
+    }
+
+
+def _answer_key_observed_value(submission: Submission, rule: dict[str, Any], criterion_key: str) -> str | None:
+    evidence_key = rule.get("evidence_key")
+    for evidence in submission.evidence:
+        value_payload = evidence.value_payload or {}
+        if isinstance(evidence_key, str) and evidence_key in value_payload:
+            return str(value_payload[evidence_key])
+        if criterion_key in value_payload:
+            return str(value_payload[criterion_key])
+        if "answer" in value_payload:
+            return str(value_payload["answer"])
+        if evidence.raw_text is not None and evidence.raw_text.strip():
+            return evidence.raw_text
+    return None
+
+
+def _answer_key_rule_matches(*, rule_type: str, rule: dict[str, Any], observed_value: str | None) -> bool:
+    if observed_value is None:
+        return False
+    if rule_type == "exact_text":
+        return observed_value == str(rule.get("expected", ""))
+    if rule_type == "normalized_text":
+        return _normalize_text(observed_value) == _normalize_text(str(rule.get("expected", "")))
+    if rule_type == "accepted_variants":
+        accepted_values = rule.get("accepted_variants", rule.get("accepted", []))
+        if not isinstance(accepted_values, list):
+            accepted_values = [accepted_values]
+        return _normalize_text(observed_value) in {_normalize_text(str(value)) for value in accepted_values}
+    if rule_type == "numeric_exact":
+        return _decimal_or_none(observed_value) == _decimal_or_none(rule.get("numeric_value", rule.get("expected")))
+    if rule_type == "numeric_tolerance":
+        observed_decimal = _decimal_or_none(observed_value)
+        expected_decimal = _decimal_or_none(rule.get("numeric_value", rule.get("expected")))
+        tolerance = _decimal_or_none(rule.get("tolerance"))
+        if observed_decimal is None or expected_decimal is None or tolerance is None:
+            return False
+        return abs(observed_decimal - expected_decimal) <= tolerance
+    if rule_type == "regex":
+        pattern = rule.get("pattern")
+        if not isinstance(pattern, str) or not pattern:
+            return False
+        return re.search(pattern, observed_value) is not None
+    raise GradingOrchestrationError(f"Unsupported answer key rule type {rule_type!r}.")
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(value.strip().casefold().split())
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _answer_key_explanation(*, rule_type: str, matched: bool) -> str:
+    state = "matched" if matched else "did not match"
+    return f"Answer key {rule_type} rule {state} submitted evidence."
 
 
 def _invoke_and_validate_ai(
@@ -613,8 +893,12 @@ def _add_criterion_results(
 ) -> None:
     deterministic_scores: dict[str, Decimal] = deterministic_payload.get("criterion_scores", {})
     selected_levels = deterministic_payload.get("selected_levels_by_criterion", {})
+    answer_key_findings = {
+        finding["criterion_key"]: finding for finding in deterministic_payload.get("answer_key_findings", [])
+    }
     criterion_max_scores = _criterion_max_scores(rubric_version)
     for criterion_key, score in deterministic_scores.items():
+        answer_key_finding = answer_key_findings.get(criterion_key)
         record = CriterionResult(
             organization_id=submission.organization_id,
             grading_result_id=grading_result.id,
@@ -623,10 +907,11 @@ def _add_criterion_results(
             score=score,
             max_score=criterion_max_scores[criterion_key],
             confidence=Decimal("1"),
-            explanation=f"Deterministic rubric level {selected_levels.get(criterion_key)!r} selected.",
+            explanation=_deterministic_explanation(criterion_key, selected_levels, answer_key_finding),
             metadata_payload={
                 "selected_level": selected_levels.get(criterion_key),
                 "rubric_version_id": str(rubric_version.id),
+                "answer_key_finding": copy.deepcopy(answer_key_finding) if answer_key_finding is not None else None,
             },
         )
         db.add(record)
@@ -654,6 +939,16 @@ def _add_criterion_results(
             },
         )
         db.add(record)
+
+
+def _deterministic_explanation(
+    criterion_key: str,
+    selected_levels: dict[str, str],
+    answer_key_finding: dict[str, Any] | None,
+) -> str:
+    if answer_key_finding is not None:
+        return str(answer_key_finding["explanation"])
+    return f"Deterministic rubric level {selected_levels.get(criterion_key)!r} selected."
 
 
 def _evaluate_confidence_policy(
@@ -916,6 +1211,91 @@ def _score_and_confidence(
     total_score = sum((Decimal(str(item["score"])) for item in ai_payload["criterion_suggestions"]), Decimal("0"))
     max_score = sum((Decimal(str(item["max_score"])) for item in ai_payload["criterion_suggestions"]), Decimal("0"))
     return total_score, max_score, Decimal(str(ai_payload["confidence"]))
+
+
+def _resolve_active_rubric_binding(
+    db: GradingSession,
+    *,
+    submission: Submission,
+) -> tuple[RubricBinding | None, str | None]:
+    if submission.assessment_item_id is not None:
+        binding = db.scalar(
+            select(RubricBinding)
+            .where(
+                RubricBinding.organization_id == submission.organization_id,
+                RubricBinding.assessment_item_id == submission.assessment_item_id,
+                RubricBinding.status == "active",
+            )
+            .order_by(RubricBinding.created_at.desc())
+        )
+        if binding is not None:
+            return _typed_rubric_binding(binding), "assessment_item_binding"
+
+    if submission.assessment_id is not None:
+        binding = db.scalar(
+            select(RubricBinding)
+            .where(
+                RubricBinding.organization_id == submission.organization_id,
+                RubricBinding.assessment_id == submission.assessment_id,
+                RubricBinding.status == "active",
+            )
+            .order_by(RubricBinding.created_at.desc())
+        )
+        if binding is not None:
+            return _typed_rubric_binding(binding), "assessment_binding"
+
+    return None, None
+
+
+def _rubric_version_from_binding(db: GradingSession, binding: RubricBinding) -> RubricVersion:
+    if binding.rubric_version is not None:
+        return binding.rubric_version
+    rubric_version = db.get(RubricVersion, binding.rubric_version_id)
+    if rubric_version is None:
+        raise GradingOrchestrationError("Active rubric binding points to a missing rubric version.")
+    return _typed_rubric_version(rubric_version)
+
+
+def _resolve_latest_published_answer_key_version(
+    db: GradingSession,
+    *,
+    submission: Submission,
+) -> AnswerKeyVersion | None:
+    if submission.assessment_item_id is None:
+        return None
+    answer_key_version = db.scalar(
+        select(AnswerKeyVersion)
+        .join(AnswerKey)
+        .where(
+            AnswerKey.organization_id == submission.organization_id,
+            AnswerKey.assessment_item_id == submission.assessment_item_id,
+            AnswerKey.status == "published",
+            AnswerKeyVersion.organization_id == submission.organization_id,
+            AnswerKeyVersion.status == "published",
+        )
+        .order_by(AnswerKeyVersion.version_number.desc())
+    )
+    if answer_key_version is None:
+        return None
+    return _typed_answer_key_version(answer_key_version)
+
+
+def _typed_rubric_binding(value: object) -> RubricBinding:
+    if not isinstance(value, RubricBinding):
+        raise GradingOrchestrationError("Rubric binding query returned an unexpected record type.")
+    return value
+
+
+def _typed_rubric_version(value: object) -> RubricVersion:
+    if not isinstance(value, RubricVersion):
+        raise GradingOrchestrationError("Rubric version lookup returned an unexpected record type.")
+    return value
+
+
+def _typed_answer_key_version(value: object) -> AnswerKeyVersion:
+    if not isinstance(value, AnswerKeyVersion):
+        raise GradingOrchestrationError("Answer key version query returned an unexpected record type.")
+    return value
 
 
 def _validate_published_rubric_version(submission: Submission, rubric_version: RubricVersion) -> None:

@@ -14,21 +14,31 @@ from app.db.models import (
     Submission,
     SubmissionEvidence,
 )
-from app.db.models.rubric import AnswerKeyVersion
+from app.db.models.rubric import AnswerKeyVersion, RubricBinding
 from app.db.services.grading_orchestration import (
     AIOutputValidationError,
     GradingOrchestrationError,
     GradingPolicy,
+    orchestrate_grading_for_submission,
     orchestrate_grading,
+    resolve_grading_context,
     start_grading_run,
     validate_ai_output,
 )
 
 
 class RecordingSession:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        scalar_results: list[object | None] | None = None,
+        get_results: dict[tuple[object, object], object] | None = None,
+    ) -> None:
         self.added: list[object] = []
         self.flush_count = 0
+        self.scalar_results = list(scalar_results or [])
+        self.scalar_calls: list[object] = []
+        self.get_results = get_results or {}
 
     def add(self, record: object) -> None:
         self.added.append(record)
@@ -38,6 +48,15 @@ class RecordingSession:
         for record in self.added:
             if hasattr(record, "id") and record.id is None:
                 record.id = uuid.uuid4()
+
+    def scalar(self, statement: object) -> object | None:
+        self.scalar_calls.append(statement)
+        if not self.scalar_results:
+            return None
+        return self.scalar_results.pop(0)
+
+    def get(self, entity: object, ident: object) -> object | None:
+        return self.get_results.get((entity, ident))
 
 
 class FakeAIProvider:
@@ -135,13 +154,35 @@ def make_rubric_version(submission: Submission, *, status: str = "published") ->
     )
 
 
-def make_answer_key_version(submission: Submission, *, status: str = "published") -> AnswerKeyVersion:
+def make_rubric_binding(
+    submission: Submission,
+    rubric: RubricVersion,
+    *,
+    context_type: str = "assessment_item",
+) -> RubricBinding:
+    return RubricBinding(
+        id=uuid.uuid4(),
+        organization_id=submission.organization_id,
+        rubric_version_id=rubric.id,
+        assessment_id=submission.assessment_id if context_type == "assessment" else None,
+        assessment_item_id=submission.assessment_item_id if context_type == "assessment_item" else None,
+        context_type=context_type,
+        status="active",
+    )
+
+
+def make_answer_key_version(
+    submission: Submission,
+    *,
+    status: str = "published",
+    key_payload: dict[str, Any] | None = None,
+) -> AnswerKeyVersion:
     return AnswerKeyVersion(
         id=uuid.uuid4(),
         organization_id=submission.organization_id,
         answer_key_id=uuid.uuid4(),
         version_number=1,
-        key_payload={"accepted": ["Deterministic checks should run before AI."]},
+        key_payload=key_payload or {"accepted": ["Deterministic checks should run before AI."]},
         status=status,
     )
 
@@ -173,6 +214,122 @@ def test_start_grading_requires_answer_key_when_deterministic_key_is_required() 
             RecordingSession(),
             submission=submission,
             rubric_version=rubric,
+            answer_key_required=True,
+        )
+
+
+def test_resolve_grading_context_uses_explicit_rubric_without_binding_lookup() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+
+    context = resolve_grading_context(session, submission=submission, rubric_version=rubric)
+
+    assert context.rubric_version == rubric
+    assert context.answer_key_version is None
+    assert context.context_payload["rubric_selection_source"] == "explicit"
+    assert context.context_payload["rubric_binding_id"] is None
+    assert session.scalar_calls == []
+
+
+def test_orchestrate_for_submission_resolves_assessment_item_binding() -> None:
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    binding = make_rubric_binding(submission, rubric)
+    session = RecordingSession(
+        scalar_results=[binding],
+        get_results={(RubricVersion, rubric.id): rubric},
+    )
+
+    outcome = orchestrate_grading_for_submission(
+        session,
+        submission=submission,
+        selected_levels_by_criterion={"correctness": "meets", "clarity": "partial"},
+    )
+
+    assert outcome.grading_run.rubric_version_id == rubric.id
+    assert outcome.grading_run.context_payload["rubric_selection_source"] == "assessment_item_binding"
+    assert outcome.grading_run.context_payload["rubric_binding_id"] == str(binding.id)
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "finalized"
+
+
+def test_resolve_grading_context_falls_back_to_assessment_binding() -> None:
+    submission = make_submission()
+    submission.assessment_id = uuid.uuid4()
+    rubric = make_rubric_version(submission)
+    binding = make_rubric_binding(submission, rubric, context_type="assessment")
+    session = RecordingSession(
+        scalar_results=[None, binding],
+        get_results={(RubricVersion, rubric.id): rubric},
+    )
+
+    context = resolve_grading_context(session, submission=submission)
+
+    assert context.rubric_version == rubric
+    assert context.context_payload["rubric_selection_source"] == "assessment_binding"
+    assert context.context_payload["rubric_binding_id"] == str(binding.id)
+    assert len(session.scalar_calls) == 2
+
+
+def test_resolve_grading_context_requires_explicit_rubric_or_active_binding() -> None:
+    submission = make_submission()
+    session = RecordingSession()
+
+    with pytest.raises(GradingOrchestrationError, match="active rubric binding"):
+        resolve_grading_context(session, submission=submission)
+
+
+def test_orchestrate_for_submission_resolves_required_answer_key_version() -> None:
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    binding = make_rubric_binding(submission, rubric)
+    answer_key = make_answer_key_version(
+        submission,
+        key_payload={
+            "rules": [
+                {
+                    "criterion_key": "correctness",
+                    "rule_type": "accepted_variants",
+                    "accepted": ["deterministic checks should run before ai."],
+                    "correct_level": "meets",
+                    "incorrect_level": "needs_revision",
+                }
+            ]
+        },
+    )
+    session = RecordingSession(
+        scalar_results=[binding, answer_key],
+        get_results={(RubricVersion, rubric.id): rubric},
+    )
+
+    outcome = orchestrate_grading_for_submission(
+        session,
+        submission=submission,
+        answer_key_required=True,
+        selected_levels_by_criterion={"clarity": "meets"},
+    )
+
+    assert outcome.grading_run.rubric_version_id == rubric.id
+    assert outcome.grading_run.answer_key_version_id == answer_key.id
+    assert outcome.grading_run.context_payload["answer_key_selection_source"] == "assessment_item_latest_published"
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.total_score == Decimal("6")
+
+
+def test_orchestrate_for_submission_blocks_when_required_answer_key_is_missing() -> None:
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    binding = make_rubric_binding(submission, rubric)
+    session = RecordingSession(
+        scalar_results=[binding, None],
+        get_results={(RubricVersion, rubric.id): rubric},
+    )
+
+    with pytest.raises(Exception, match="answer key version"):
+        orchestrate_grading_for_submission(
+            session,
+            submission=submission,
             answer_key_required=True,
         )
 
@@ -503,3 +660,160 @@ def test_answer_key_version_is_captured_when_required() -> None:
     assert outcome.grading_result.answer_key_version_id == answer_key.id
     assert records(session, GradingRun)[0].context_payload["ai_allowed"] is False
     assert records(session, GradingResult)[0].rubric_version_id == rubric.id
+
+
+def test_answer_key_accepted_variants_selects_deterministic_level_before_ai() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    answer_key = make_answer_key_version(
+        submission,
+        key_payload={
+            "rules": [
+                {
+                    "criterion_key": "correctness",
+                    "rule_type": "accepted_variants",
+                    "accepted": ["deterministic checks should run before ai."],
+                    "correct_level": "meets",
+                    "incorrect_level": "needs_revision",
+                }
+            ]
+        },
+    )
+    provider = FakeAIProvider(
+        {
+            "criterion_suggestions": [
+                {
+                    "criterion_key": "correctness",
+                    "score": "0",
+                    "confidence": "0.99",
+                    "explanation": "Would disagree if called.",
+                }
+            ],
+            "confidence": "0.99",
+        }
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        answer_key_version=answer_key,
+        answer_key_required=True,
+        selected_levels_by_criterion={"clarity": "meets"},
+        ai_provider=provider,
+        policy=GradingPolicy(ai_allowed=False),
+    )
+
+    assert provider.requests == []
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "finalized"
+    assert outcome.grading_result.total_score == Decimal("6")
+    correctness = [
+        record for record in records(session, CriterionResult) if record.criterion_key == "correctness"
+    ][0]
+    assert correctness.score == Decimal("4")
+    assert correctness.metadata_payload["answer_key_finding"]["matched"] is True
+    assert correctness.metadata_payload["answer_key_finding"]["rule_type"] == "accepted_variants"
+
+
+def test_answer_key_miss_selects_incorrect_level_and_can_finalize_when_coverage_complete() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    answer_key = make_answer_key_version(
+        submission,
+        key_payload={
+            "rules": [
+                {
+                    "criterion_key": "correctness",
+                    "rule_type": "exact_text",
+                    "expected": "A different answer.",
+                    "correct_level": "meets",
+                    "incorrect_level": "needs_revision",
+                }
+            ]
+        },
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        answer_key_version=answer_key,
+        answer_key_required=True,
+        selected_levels_by_criterion={"clarity": "meets"},
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "finalized"
+    assert outcome.grading_result.total_score == Decimal("2")
+    correctness = [
+        record for record in records(session, CriterionResult) if record.criterion_key == "correctness"
+    ][0]
+    assert correctness.score == Decimal("0")
+    assert correctness.metadata_payload["selected_level"] == "needs_revision"
+    assert correctness.metadata_payload["answer_key_finding"]["matched"] is False
+
+
+def test_answer_key_numeric_tolerance_uses_structured_evidence_payload() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    submission.evidence[0].raw_text = None
+    submission.evidence[0].value_payload = {"numeric_answer": "3.14"}
+    rubric = make_rubric_version(submission)
+    answer_key = make_answer_key_version(
+        submission,
+        key_payload={
+            "rules": [
+                {
+                    "criterion_key": "correctness",
+                    "rule_type": "numeric_tolerance",
+                    "evidence_key": "numeric_answer",
+                    "expected": "3.10",
+                    "tolerance": "0.05",
+                    "correct_level": "meets",
+                    "incorrect_level": "needs_revision",
+                }
+            ]
+        },
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        answer_key_version=answer_key,
+        answer_key_required=True,
+        selected_levels_by_criterion={"clarity": "meets"},
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "finalized"
+    assert outcome.grading_result.total_score == Decimal("6")
+    correctness = [
+        record for record in records(session, CriterionResult) if record.criterion_key == "correctness"
+    ][0]
+    assert correctness.metadata_payload["answer_key_finding"]["observed_value"] == "3.14"
+    assert correctness.metadata_payload["answer_key_finding"]["matched"] is True
+
+
+def test_answer_key_without_supported_rules_routes_to_review() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    answer_key = make_answer_key_version(submission, key_payload={"notes": "No deterministic rule."})
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        answer_key_version=answer_key,
+        answer_key_required=True,
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "needs_review"
+    assert outcome.review_task is not None
+    assert outcome.review_task.escalation_reason == "partial_grading"
+    assert "answer_key_no_rules" in outcome.review_task.policy_payload["reasons"]

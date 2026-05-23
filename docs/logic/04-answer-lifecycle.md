@@ -28,6 +28,7 @@ New lifecycle code should not treat those compatibility statuses as authoritativ
 - Learner revisions create a new answer package instead of mutating the submitted package.
 - Regrades create new grading runs against unchanged submitted evidence.
 - New answer packages explicitly supersede older packages.
+- Lifecycle services block a second current submitted package for the same learner and assessment context unless it explicitly supersedes the current package.
 - New grading results explicitly supersede older grading results.
 - Important lifecycle actions create audit events.
 - Deterministic intake validation runs before AI-assisted processing.
