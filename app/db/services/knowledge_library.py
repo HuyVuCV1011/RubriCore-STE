@@ -9,7 +9,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import ArtifactConversion, AuditEvent, FileArtifact, FilePurpose, KnowledgeChunk, KnowledgeSource
+from app.db.models import (
+    ArtifactConversion,
+    AuditEvent,
+    FileArtifact,
+    FilePurpose,
+    KnowledgeChunk,
+    KnowledgeSource,
+    RubricSuggestion,
+)
 
 
 VALID_ACCESS_SCOPES = {"private", "course", "organization", "subject_pack", "public_safe"}
@@ -40,6 +48,13 @@ class RetrievedKnowledgeChunk:
     citation: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class KnowledgeSourceRevisionResult:
+    knowledge_source: KnowledgeSource
+    converted_markdown_artifact: FileArtifact | None
+    chunks: list[KnowledgeChunk]
+
+
 def _get_file_purpose(db: Session, organization_id: uuid.UUID, key: str) -> FilePurpose:
     purpose = db.scalar(
         select(FilePurpose).where(
@@ -56,7 +71,9 @@ def normalize_access_scope(access_scope: str | None) -> str:
     if access_scope is None:
         return "organization"
     normalized = access_scope.replace("-", "_")
-    return normalized if normalized in VALID_ACCESS_SCOPES else "organization"
+    if normalized not in VALID_ACCESS_SCOPES:
+        raise KnowledgeLibraryError(f"Invalid knowledge access scope: {access_scope!r}.")
+    return normalized
 
 
 def _source_format_from_filename(filename: str) -> str:
@@ -170,6 +187,197 @@ def register_knowledge_source(
         request_id=request_id,
     )
     return knowledge_source
+
+
+def create_knowledge_source_version(
+    db: Session,
+    *,
+    previous_source: KnowledgeSource,
+    source_filename: str,
+    source_storage_uri: str,
+    title: str | None = None,
+    owner_user_id: uuid.UUID | None = None,
+    subject_pack_id: uuid.UUID | None = None,
+    access_scope: str | None = None,
+    source_type: str = "teacher_import",
+    summary: str | None = None,
+    metadata_payload: dict[str, Any] | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    actor_source: str = "teacher",
+    reason: str | None = None,
+    request_id: str | None = None,
+) -> KnowledgeSource:
+    """Create a new source version without mutating the previous source or its chunks."""
+
+    if previous_source.id is None:
+        raise KnowledgeLibraryError("Previous knowledge source must be persisted before creating a new version.")
+
+    scope = normalize_access_scope(access_scope or previous_source.access_scope)
+    source_format = _source_format_from_filename(source_filename)
+    metadata = metadata_payload or {}
+    source_purpose = _get_file_purpose(db, previous_source.organization_id, "knowledge_source")
+    supported_formats = SUPPORTED_MARKDOWN_FORMATS | SUPPORTED_TEXT_FORMATS
+    parser_status = "supported" if source_format in supported_formats else "unsupported"
+    document_formats = {"markdown", "text", "pdf", "doc", "docx", "rtf"}
+    next_version = _knowledge_source_version_number(previous_source) + 1
+
+    source_artifact = FileArtifact(
+        organization_id=previous_source.organization_id,
+        file_purpose_id=source_purpose.id,
+        original_filename=source_filename,
+        normalized_filename=source_filename,
+        file_extension=source_filename.rsplit(".", 1)[-1] if "." in source_filename else None,
+        mime_type=_mime_type_for_source_format(source_format),
+        detected_file_category="document" if source_format in document_formats else None,
+        storage_uri=source_storage_uri,
+        import_source=source_type,
+        owner_user_id=owner_user_id if owner_user_id is not None else previous_source.owner_user_id,
+        uploaded_by_user_id=actor_user_id or owner_user_id or previous_source.owner_user_id,
+        source_type=source_type,
+        source_format=source_format,
+        access_scope=scope,
+        parser_support_status=parser_status,
+        status="active",
+        metadata_payload={
+            **metadata,
+            "previous_knowledge_source_id": str(previous_source.id),
+            "previous_source_file_artifact_id": str(previous_source.source_file_artifact_id),
+        },
+    )
+    db.add(source_artifact)
+    db.flush()
+
+    knowledge_source = KnowledgeSource(
+        organization_id=previous_source.organization_id,
+        owner_user_id=owner_user_id if owner_user_id is not None else previous_source.owner_user_id,
+        subject_pack_id=subject_pack_id if subject_pack_id is not None else previous_source.subject_pack_id,
+        source_file_artifact_id=source_artifact.id,
+        title=title if title is not None else previous_source.title,
+        version_number=next_version,
+        access_scope=scope,
+        conversion_status="pending" if parser_status == "supported" else "unsupported",
+        status="draft",
+        summary=summary if summary is not None else previous_source.summary,
+        metadata_payload={
+            "source_format": source_format,
+            "previous_knowledge_source_id": str(previous_source.id),
+            "previous_source_file_artifact_id": str(previous_source.source_file_artifact_id),
+            **metadata,
+        },
+    )
+    db.add(knowledge_source)
+    db.flush()
+
+    _audit_knowledge_event(
+        db,
+        organization_id=previous_source.organization_id,
+        actor_user_id=actor_user_id or owner_user_id,
+        actor_source=actor_source,
+        action="knowledge_source.version_created",
+        entity_type="knowledge_source",
+        entity_id=knowledge_source.id,
+        previous_state={
+            "knowledge_source_id": str(previous_source.id),
+            "source_file_artifact_id": str(previous_source.source_file_artifact_id),
+            "version_number": _knowledge_source_version_number(previous_source),
+            "conversion_status": previous_source.conversion_status,
+            "status": previous_source.status,
+        },
+        new_state={
+            "knowledge_source_id": str(knowledge_source.id),
+            "source_file_artifact_id": str(source_artifact.id),
+            "previous_knowledge_source_id": str(previous_source.id),
+            "version_number": knowledge_source.version_number,
+            "access_scope": scope,
+            "source_format": source_format,
+            "conversion_status": knowledge_source.conversion_status,
+            "status": knowledge_source.status,
+        },
+        reason=reason,
+        request_id=request_id,
+    )
+    return knowledge_source
+
+
+def revise_knowledge_source(
+    db: Session,
+    *,
+    previous_source: KnowledgeSource,
+    source_filename: str,
+    source_storage_uri: str,
+    source_content: str | None,
+    title: str | None = None,
+    owner_user_id: uuid.UUID | None = None,
+    subject_pack_id: uuid.UUID | None = None,
+    access_scope: str | None = None,
+    source_type: str = "teacher_import",
+    summary: str | None = None,
+    metadata_payload: dict[str, Any] | None = None,
+    markdown_filename: str | None = None,
+    markdown_storage_uri: str | None = None,
+    max_characters: int = 1200,
+    actor_user_id: uuid.UUID | None = None,
+    actor_source: str = "teacher",
+    reason: str | None = None,
+    request_id: str | None = None,
+) -> KnowledgeSourceRevisionResult:
+    """Create, convert, and chunk a new knowledge-source version when supported."""
+
+    new_source = create_knowledge_source_version(
+        db,
+        previous_source=previous_source,
+        source_filename=source_filename,
+        source_storage_uri=source_storage_uri,
+        title=title,
+        owner_user_id=owner_user_id,
+        subject_pack_id=subject_pack_id,
+        access_scope=access_scope,
+        source_type=source_type,
+        summary=summary,
+        metadata_payload=metadata_payload,
+        actor_user_id=actor_user_id,
+        actor_source=actor_source,
+        reason=reason,
+        request_id=request_id,
+    )
+
+    converted_artifact = convert_knowledge_source_to_markdown(
+        db,
+        knowledge_source=new_source,
+        source_filename=source_filename,
+        source_content=source_content,
+        markdown_filename=markdown_filename,
+        markdown_storage_uri=markdown_storage_uri,
+        actor_user_id=actor_user_id,
+        actor_source=actor_source,
+        reason=reason,
+        request_id=request_id,
+    )
+    if converted_artifact is None:
+        return KnowledgeSourceRevisionResult(
+            knowledge_source=new_source,
+            converted_markdown_artifact=None,
+            chunks=[],
+        )
+
+    markdown_content = source_content if _source_format_from_filename(source_filename) == "markdown" else None
+    if markdown_content is None:
+        markdown_content = convert_plain_text_to_markdown(source_content or "", title=new_source.title)
+    chunks = create_knowledge_chunks(
+        db,
+        knowledge_source=new_source,
+        markdown_content=markdown_content,
+        max_characters=max_characters,
+        actor_user_id=actor_user_id,
+        actor_source=actor_source,
+        reason=reason,
+        request_id=request_id,
+    )
+    return KnowledgeSourceRevisionResult(
+        knowledge_source=new_source,
+        converted_markdown_artifact=converted_artifact,
+        chunks=chunks,
+    )
 
 
 def convert_knowledge_source_to_markdown(
@@ -380,6 +588,15 @@ def create_knowledge_chunks(
             raise KnowledgeLibraryError(
                 "Knowledge source already has active chunks with different content; use replace_existing=True."
             )
+        cited_chunk_ids = [
+            str(chunk.id)
+            for chunk in existing_chunks
+            if chunk.id is not None and _chunk_is_cited_by_suggestion(db, chunk)
+        ]
+        if cited_chunk_ids:
+            raise KnowledgeLibraryError(
+                "Knowledge source has active chunks cited by rubric suggestions; create a new source version instead."
+            )
         for chunk in existing_chunks:
             chunk.status = "superseded"
         db.flush()
@@ -397,7 +614,13 @@ def create_knowledge_chunks(
             content_hash=draft.content_hash,
             character_count=draft.character_count,
             status="active",
-            metadata_payload=draft.metadata_payload,
+            metadata_payload={
+                **draft.metadata_payload,
+                "knowledge_source_title": knowledge_source.title,
+                "knowledge_source_version_number": _knowledge_source_version_number(knowledge_source),
+                "access_scope": knowledge_source.access_scope,
+                "converted_markdown_artifact_id": str(knowledge_source.converted_markdown_artifact_id),
+            },
         )
         db.add(chunk)
         chunks.append(chunk)
@@ -473,13 +696,34 @@ def retrieve_candidate_chunks(
 
 
 def citation_for_chunk(chunk: KnowledgeChunk) -> dict[str, Any]:
+    metadata = chunk.metadata_payload or {}
     return {
         "knowledge_source_id": str(chunk.knowledge_source_id),
+        "knowledge_source_version_number": metadata.get("knowledge_source_version_number"),
+        "knowledge_source_title": metadata.get("knowledge_source_title"),
+        "access_scope": metadata.get("access_scope"),
         "chunk_id": str(chunk.id),
         "chunk_key": chunk.chunk_key,
         "heading_path": list(chunk.heading_path),
         "content_hash": chunk.content_hash,
+        "excerpt": _short_excerpt(chunk.content),
     }
+
+
+def _chunk_is_cited_by_suggestion(db: Session, chunk: KnowledgeChunk) -> bool:
+    citation_probe = [{"chunk_id": str(chunk.id)}]
+    suggestion_id = db.scalar(
+        select(RubricSuggestion.id).where(
+            RubricSuggestion.organization_id == chunk.organization_id,
+            RubricSuggestion.source_citations.contains(citation_probe),
+            RubricSuggestion.status.in_(("draft", "accepted", "rejected", "superseded")),
+        )
+    )
+    return suggestion_id is not None
+
+
+def _knowledge_source_version_number(knowledge_source: KnowledgeSource) -> int:
+    return knowledge_source.version_number or 1
 
 
 def register_markdown_knowledge_source(
@@ -496,6 +740,9 @@ def register_markdown_knowledge_source(
     access_scope: str | None = "organization",
     summary: str | None = None,
     metadata_payload: dict | None = None,
+    actor_source: str = "knowledge_library",
+    reason: str | None = None,
+    request_id: str | None = None,
 ) -> KnowledgeSource:
     """Register an already-converted Markdown knowledge source.
 
@@ -584,6 +831,30 @@ def register_markdown_knowledge_source(
         metadata_payload=metadata,
     )
     db.add(knowledge_source)
+    db.flush()
+    _audit_knowledge_event(
+        db,
+        organization_id=organization_id,
+        actor_user_id=owner_user_id,
+        actor_source=actor_source,
+        action="knowledge_source.registered",
+        entity_type="knowledge_source",
+        entity_id=knowledge_source.id,
+        previous_state={},
+        new_state={
+            "knowledge_source_id": str(knowledge_source.id),
+            "source_file_artifact_id": str(source_artifact.id),
+            "converted_markdown_artifact_id": str(markdown_artifact.id),
+            "title": title,
+            "access_scope": scope,
+            "source_format": source_artifact.source_format,
+            "conversion_status": knowledge_source.conversion_status,
+            "status": knowledge_source.status,
+            "preconverted": True,
+        },
+        reason=reason,
+        request_id=request_id,
+    )
     return knowledge_source
 
 
@@ -665,6 +936,13 @@ def _markdown_filename_for(source_filename: str) -> str:
 
 def _hash_text(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _short_excerpt(content: str, *, max_characters: int = 240) -> str:
+    excerpt = re.sub(r"\s+", " ", content).strip()
+    if len(excerpt) <= max_characters:
+        return excerpt
+    return excerpt[: max_characters - 1].rstrip() + "..."
 
 
 def _split_markdown_sections(markdown_content: str) -> list[tuple[list[str], str]]:
