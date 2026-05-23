@@ -24,6 +24,7 @@ The current backend slice supports:
 - Markdown passthrough conversion
 - plain-text to Markdown conversion
 - explicit unsupported or failed conversion status
+- revised knowledge-source versions for changed source content
 - Markdown chunk creation with heading paths, stable positions, content hashes, and citations
 - retrieval-ready non-vector candidate selection through scoped filtering and deterministic text matching
 - rubric suggestion draft creation with citations
@@ -49,6 +50,8 @@ Knowledge registration creates source identity before conversion or retrieval.
 The registration service creates a `FileArtifact` with purpose `knowledge_source`, source format, source type, access scope, owner/uploader where available, and storage reference. It then creates a `KnowledgeSource` linked to that artifact.
 
 Supported local formats are marked ready for conversion. Unsupported formats remain stored artifacts with `unsupported` conversion status rather than causing intake to fail.
+
+Changed source content creates a new knowledge-source version instead of mutating the prior source in place. The revision flow creates a new source artifact and a new `KnowledgeSource` row, records lineage to the previous source in metadata and audit state, and then runs conversion and chunking for the new version when supported. Existing chunks, suggestions, and citations remain tied to the original source version.
 
 ## Local Conversion
 
@@ -76,9 +79,16 @@ The chunking helper:
 - tracks character counts
 - preserves content text for retrieval and citations
 - returns existing active chunks when the same source version is chunked again with identical content
-- requires explicit replacement before superseding active chunks with changed content
+- requires explicit replacement before superseding uncited active chunks with changed content
+- blocks replacement when active chunks are already cited by rubric suggestions
 
 Chunks are available for retrieval only when active. Unsupported sources do not produce chunks.
+
+When content changes after chunks have been cited, callers should use the source revision workflow instead of chunk replacement:
+
+`old knowledge source -> new knowledge source version -> conversion -> new chunks`
+
+This preserves old citations while making the revised content available as a separate retrieval source.
 
 ## Non-Vector Retrieval
 
@@ -108,7 +118,7 @@ Each suggestion records:
 - creator and reviewer fields where available
 - decision reason and accepted payload when reviewed
 
-Suggestions require source citations so teachers and auditors can trace where the recommendation came from.
+Suggestions require source citations so teachers and auditors can trace where the recommendation came from. Current chunk citations include source ID, source version number, source title, access scope, chunk ID, chunk key, heading path, content hash, and a short excerpt.
 
 ## Teacher Decisions
 
@@ -132,6 +142,7 @@ To make accepted suggestion content usable for grading, a teacher must publish a
 The backend emits audit events for:
 
 - knowledge source registration
+- knowledge source version creation
 - successful conversion
 - unsupported or failed conversion
 - chunk creation
@@ -144,6 +155,10 @@ The backend emits audit events for:
 The intended provenance chain is:
 
 `source artifact -> conversion attempt -> converted Markdown artifact -> knowledge source -> chunks -> suggestion -> teacher decision -> rubric draft -> future published rubric version`
+
+For revised content, the intended provenance chain is:
+
+`old knowledge source -> new source artifact -> new knowledge source version -> conversion attempt -> converted Markdown artifact -> chunks`
 
 ## Fixture and Seed Expectations
 
