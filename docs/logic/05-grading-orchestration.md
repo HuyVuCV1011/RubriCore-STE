@@ -2,7 +2,7 @@
 
 This document describes the public Phase 1 grading orchestration logic for RubriCore-STE. It focuses on grading runs, deterministic-first execution, optional AI assistance, structured validation, confidence routing, review tasks, persistence, and auditability.
 
-Submission immutability is described in [Answer Lifecycle](04-answer-lifecycle.md). Rubric versioning and deterministic score calculation are described in [Rubric Framework Logic](03-rubric-framework.md). Durable persistence and artifact provenance are described in [Setup Database Logic](01-setupdb.md).
+Submission immutability is described in [Answer Lifecycle](04-answer-lifecycle.md). Rubric versioning and deterministic score calculation are described in [Rubric Framework Logic](03-rubric-framework.md). Confidence policy details are described in [Confidence Policy Logic](06-confidence-policy.md). Durable persistence and artifact provenance are described in [Setup Database Logic](01-setupdb.md).
 
 ## Core Boundary
 
@@ -99,11 +99,14 @@ Invalid AI output is not used for authoritative scores. It is preserved as an in
 
 ## Confidence and Review Routing
 
+Detailed confidence definitions, bands, and policy gates are described in [Confidence Policy Logic](06-confidence-policy.md).
+
 The result may auto-finalize only when:
 
 - the submission and grading context are valid
 - deterministic checks completed
 - AI output is valid when AI is required or used for scoring
+- required rubric criteria are covered by deterministic or valid AI results
 - all scores are inside rubric bounds
 - confidence meets the configured threshold
 - no mandatory review policy applies
@@ -112,6 +115,7 @@ The result may auto-finalize only when:
 The service creates a `ReviewTask` when:
 
 - confidence is below threshold
+- required rubric coverage is incomplete
 - AI output is invalid or failed while AI is required
 - deterministic and AI outputs disagree
 - deterministic scoring is partial or blocked
@@ -147,7 +151,7 @@ Run the full suite:
 .venv/bin/pytest
 ```
 
-The current tests cover prerequisite validation, answer-key-required behavior, deterministic auto-finalization, AI validation, deterministic/AI disagreement routing, invalid AI output routing, low-confidence review routing, and run/result context persistence.
+The current tests cover prerequisite validation, answer-key-required behavior, deterministic auto-finalization, AI validation, deterministic/AI disagreement routing, invalid AI output routing, low-confidence review routing, full-coverage AI-only finalization, mandatory review gates, incomplete coverage review routing, and run/result context persistence.
 
 ## Phase 1 Limits
 

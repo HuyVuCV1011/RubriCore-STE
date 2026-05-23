@@ -34,11 +34,21 @@ CONFIDENCE_MEDIUM = "medium"
 CONFIDENCE_LOW = "low"
 CONFIDENCE_BLOCKED = "blocked"
 
+ROUTING_AUTO_ACCEPT = "auto_accept"
+ROUTING_REVIEW = "route_to_review"
+ROUTING_FAIL_RUN = "fail_run"
+ROUTING_RETRY_AI_STEP = "retry_ai_step"
+
+REASON_AUTO_FINALIZE_POLICY_PASSED = "auto_finalize_policy_passed"
 REASON_CONFIDENCE_BELOW_THRESHOLD = "confidence_below_threshold"
+REASON_CONFIDENCE_MISSING = "confidence_missing"
 REASON_DETERMINISTIC_AI_DISAGREEMENT = "deterministic_ai_disagreement"
+REASON_SCORE_DISAGREEMENT = "score_disagreement"
 REASON_AI_VALIDATION_FAILED = "ai_validation_failed"
 REASON_MANDATORY_REVIEW_POLICY = "mandatory_review_policy"
 REASON_PARTIAL_GRADING = "partial_grading"
+REASON_RUBRIC_COVERAGE_INCOMPLETE = "rubric_coverage_incomplete"
+REASON_AUTO_FINALIZE_DISABLED = "auto_finalize_disabled"
 
 
 class GradingOrchestrationError(ValueError):
@@ -81,6 +91,18 @@ class OrchestrationResult:
     grading_result: GradingResult | None
     review_task: ReviewTask | None
     ai_interaction: AIInteraction | None
+
+
+@dataclass(frozen=True)
+class ConfidencePolicyDecision:
+    decision: str
+    confidence: Decimal | None
+    confidence_band: str
+    reasons: list[str]
+    review_priority: str
+    retryable: bool
+    reviewer_summary: str
+    payload: dict[str, Any]
 
 
 def start_grading_run(
@@ -367,6 +389,7 @@ def _run_deterministic_stage(
     rubric_version: RubricVersion,
     selected_levels_by_criterion: dict[str, str],
 ) -> dict[str, Any]:
+    required_criterion_keys = [criterion["key"] for criterion in rubric_version.rubric_schema.get("criteria", [])]
     if not selected_levels_by_criterion:
         return {
             "criterion_scores": {},
@@ -374,6 +397,7 @@ def _run_deterministic_stage(
             "max_score": _max_score_from_rubric(rubric_version),
             "confidence": Decimal("0"),
             "confidence_band": CONFIDENCE_BLOCKED,
+            "required_criterion_keys": required_criterion_keys,
             "warnings": [REASON_PARTIAL_GRADING],
         }
     summary = calculate_deterministic_score(rubric_version.rubric_schema, selected_levels_by_criterion)
@@ -384,6 +408,7 @@ def _run_deterministic_stage(
         "max_score": summary.max_score,
         "confidence": Decimal("1"),
         "confidence_band": CONFIDENCE_HIGH,
+        "required_criterion_keys": required_criterion_keys,
         "warnings": [],
     }
 
@@ -451,6 +476,9 @@ def _build_grading_result(
     policy: GradingPolicy,
 ) -> GradingResult:
     total_score, max_score, confidence = _score_and_confidence(deterministic_payload, ai_payload)
+    confidence_band = _confidence_band(confidence, policy=policy)
+    coverage_summary = _rubric_coverage_summary(rubric_version, deterministic_payload, ai_payload)
+    ai_validation_summary = _ai_validation_summary(ai_payload, ai_validation_error)
     result = GradingResult(
         organization_id=submission.organization_id,
         grading_run_id=grading_run.id,
@@ -464,8 +492,18 @@ def _build_grading_result(
         feedback=ai_payload.get("overall_feedback_draft") if ai_payload is not None else None,
         explanation_payload={
             "deterministic": _json_safe(deterministic_payload),
-            "ai_validation_error": ai_validation_error,
+            "confidence_summary": {
+                "policy_confidence": str(confidence) if confidence is not None else None,
+                "confidence_band": confidence_band,
+                "source_confidences": _json_safe(_source_confidences(deterministic_payload, ai_payload)),
+                "calculation": _confidence_calculation_label(deterministic_payload, ai_payload),
+            },
+            "ai_validation_summary": ai_validation_summary,
+            "rubric_coverage_summary": coverage_summary,
+            "disagreement_flags": _disagreement_flags(deterministic_payload, ai_payload),
+            "review_reasons": [],
             "policy": {
+                "grading_policy_version": policy.grading_policy_version,
                 "confidence_threshold": str(policy.confidence_threshold),
                 "review_threshold": str(policy.review_threshold),
                 "ai_allowed": policy.ai_allowed,
@@ -500,22 +538,17 @@ def _apply_routing_policy(
     ai_validation_error: str | None,
     policy: GradingPolicy,
 ) -> ReviewTask | None:
-    reasons = _routing_reasons(
+    decision = _evaluate_confidence_policy(
         grading_result=grading_result,
         deterministic_payload=deterministic_payload,
         ai_payload=ai_payload,
         ai_validation_error=ai_validation_error,
         policy=policy,
     )
-    confidence_band = _confidence_band(grading_result.confidence)
-    if not reasons:
+    if decision.decision == ROUTING_AUTO_ACCEPT:
         grading_result.status = GRADING_RESULT_FINALIZED
         grading_result.result_type = "final"
-        grading_result.explanation_payload["routing"] = {
-            "decision": "auto_finalized",
-            "confidence_band": confidence_band,
-            "reasons": [],
-        }
+        _merge_confidence_policy_payload(grading_result, decision)
         _audit_grading_event(
             db,
             submission=submission,
@@ -525,17 +558,13 @@ def _apply_routing_policy(
             actor_source=grading_run.trigger_source,
             previous_state={"status": GRADING_RESULT_PROPOSED},
             new_state={"status": grading_result.status, "grading_result_id": str(grading_result.id)},
-            reason="auto_finalize_policy_passed",
+            reason=REASON_AUTO_FINALIZE_POLICY_PASSED,
             request_id=grading_run.context_payload.get("request_id"),
         )
         return None
 
     grading_result.status = GRADING_RESULT_NEEDS_REVIEW
-    grading_result.explanation_payload["routing"] = {
-        "decision": "review",
-        "confidence_band": confidence_band,
-        "reasons": reasons,
-    }
+    _merge_confidence_policy_payload(grading_result, decision)
     review_task = ReviewTask(
         organization_id=submission.organization_id,
         assessment_id=submission.assessment_id,
@@ -544,11 +573,11 @@ def _apply_routing_policy(
         grading_run_id=grading_run.id,
         grading_result_id=grading_result.id,
         status="open",
-        priority=_review_priority(reasons),
-        confidence_band=confidence_band,
-        escalation_reason=reasons[0],
+        priority=decision.review_priority,
+        confidence_band=decision.confidence_band,
+        escalation_reason=decision.reasons[0],
         policy_payload={
-            "reasons": reasons,
+            **copy.deepcopy(decision.payload),
             "grading_policy_version": policy.grading_policy_version,
         },
     )
@@ -563,8 +592,9 @@ def _apply_routing_policy(
         previous_state={},
         new_state={
             "grading_result_id": str(grading_result.id),
-            "confidence_band": confidence_band,
+            "confidence_band": decision.confidence_band,
             "escalation_reason": review_task.escalation_reason,
+            "reasons": decision.reasons,
         },
         reason=review_task.escalation_reason,
         request_id=grading_run.context_payload.get("request_id"),
@@ -626,14 +656,14 @@ def _add_criterion_results(
         db.add(record)
 
 
-def _routing_reasons(
+def _evaluate_confidence_policy(
     *,
     grading_result: GradingResult,
     deterministic_payload: dict[str, Any],
     ai_payload: dict[str, Any] | None,
     ai_validation_error: str | None,
     policy: GradingPolicy,
-) -> list[str]:
+) -> ConfidencePolicyDecision:
     reasons: list[str] = []
     if policy.mandatory_review:
         reasons.append(REASON_MANDATORY_REVIEW_POLICY)
@@ -641,15 +671,57 @@ def _routing_reasons(
         reasons.append(REASON_AI_VALIDATION_FAILED)
     if policy.ai_required and ai_payload is None:
         reasons.append(REASON_AI_VALIDATION_FAILED)
-    if deterministic_payload.get("warnings"):
-        reasons.extend(deterministic_payload["warnings"])
+    coverage_summary = _coverage_summary_from_payloads(deterministic_payload, ai_payload)
+    if not coverage_summary["coverage_complete"]:
+        reasons.append(REASON_PARTIAL_GRADING)
+        reasons.append(REASON_RUBRIC_COVERAGE_INCOMPLETE)
     if _has_deterministic_ai_disagreement(deterministic_payload, ai_payload):
         reasons.append(REASON_DETERMINISTIC_AI_DISAGREEMENT)
     if not policy.auto_finalize_allowed:
-        reasons.append(REASON_MANDATORY_REVIEW_POLICY)
-    if grading_result.confidence is None or grading_result.confidence < policy.confidence_threshold:
+        reasons.append(REASON_AUTO_FINALIZE_DISABLED)
+    if grading_result.confidence is None:
+        reasons.append(REASON_CONFIDENCE_MISSING)
+    elif grading_result.confidence < policy.confidence_threshold:
         reasons.append(REASON_CONFIDENCE_BELOW_THRESHOLD)
-    return _dedupe(reasons)
+    if deterministic_payload.get("warnings") and not coverage_summary["coverage_complete"]:
+        reasons.extend(deterministic_payload["warnings"])
+
+    reasons = _dedupe(reasons)
+    confidence_band = _confidence_band(grading_result.confidence, policy=policy)
+    routing_decision = ROUTING_AUTO_ACCEPT if not reasons else ROUTING_REVIEW
+    payload = {
+        "decision": routing_decision,
+        "confidence": str(grading_result.confidence) if grading_result.confidence is not None else None,
+        "confidence_band": confidence_band,
+        "reasons": reasons,
+        "policy_version": policy.grading_policy_version,
+        "thresholds": {
+            "confidence_threshold": str(policy.confidence_threshold),
+            "review_threshold": str(policy.review_threshold),
+        },
+        "review_priority": _review_priority(reasons),
+        "retryable": False,
+        "reviewer_summary": _reviewer_summary(routing_decision, reasons, confidence_band),
+        "contributing_signals": {
+            "source_confidences": _json_safe(_source_confidences(deterministic_payload, ai_payload)),
+            "calculation": _confidence_calculation_label(deterministic_payload, ai_payload),
+        },
+        "blocking_signals": reasons,
+        "rubric_coverage_summary": coverage_summary,
+        "ai_validation_summary": _ai_validation_summary(ai_payload, ai_validation_error),
+        "disagreement_flags": _disagreement_flags(deterministic_payload, ai_payload),
+        "auto_finalize_allowed": policy.auto_finalize_allowed,
+    }
+    return ConfidencePolicyDecision(
+        decision=routing_decision,
+        confidence=grading_result.confidence,
+        confidence_band=confidence_band,
+        reasons=reasons,
+        review_priority=_review_priority(reasons),
+        retryable=False,
+        reviewer_summary=payload["reviewer_summary"],
+        payload=payload,
+    )
 
 
 def _has_deterministic_ai_disagreement(
@@ -667,6 +739,162 @@ def _has_deterministic_ai_disagreement(
         if criterion_key in deterministic_scores and ai_score != deterministic_scores[criterion_key]:
             return True
     return False
+
+
+def _source_confidences(
+    deterministic_payload: dict[str, Any],
+    ai_payload: dict[str, Any] | None,
+) -> dict[str, Decimal | None]:
+    confidences: dict[str, Decimal | None] = {}
+    if deterministic_payload.get("criterion_scores"):
+        confidences["deterministic"] = Decimal(str(deterministic_payload.get("confidence", Decimal("1"))))
+    if ai_payload is not None:
+        confidences["ai"] = Decimal(str(ai_payload["confidence"]))
+    return confidences
+
+
+def _confidence_calculation_label(
+    deterministic_payload: dict[str, Any],
+    ai_payload: dict[str, Any] | None,
+) -> str:
+    if deterministic_payload.get("criterion_scores") and ai_payload is not None:
+        return "minimum_valid_contributing_confidence"
+    if deterministic_payload.get("criterion_scores"):
+        return "deterministic_confidence"
+    if ai_payload is not None:
+        return "validated_ai_aggregate_confidence"
+    return "blocked_no_scoring_signal"
+
+
+def _coverage_summary_from_payloads(
+    deterministic_payload: dict[str, Any],
+    ai_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    required_keys = set(deterministic_payload.get("required_criterion_keys", []))
+    deterministic_keys = set(deterministic_payload.get("criterion_scores", {}))
+    ai_keys = (
+        {suggestion["criterion_key"] for suggestion in ai_payload.get("criterion_suggestions", [])}
+        if ai_payload is not None
+        else set()
+    )
+    covered_keys = deterministic_keys | ai_keys
+    missing_keys = required_keys - covered_keys
+    return {
+        "required_criterion_keys": sorted(required_keys),
+        "deterministic_criterion_keys": sorted(deterministic_keys),
+        "ai_criterion_keys": sorted(ai_keys),
+        "covered_criterion_keys": sorted(covered_keys),
+        "missing_criterion_keys": sorted(missing_keys),
+        "coverage_complete": not missing_keys and bool(required_keys),
+    }
+
+
+def _rubric_coverage_summary(
+    rubric_version: RubricVersion,
+    deterministic_payload: dict[str, Any],
+    ai_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = copy.deepcopy(deterministic_payload)
+    payload["required_criterion_keys"] = [
+        criterion["key"] for criterion in rubric_version.rubric_schema.get("criteria", [])
+    ]
+    return _coverage_summary_from_payloads(payload, ai_payload)
+
+
+def _ai_validation_summary(
+    ai_payload: dict[str, Any] | None,
+    ai_validation_error: str | None,
+) -> dict[str, Any]:
+    if ai_payload is not None:
+        return {
+            "validation_status": "valid",
+            "confidence": ai_payload.get("confidence"),
+            "criterion_count": len(ai_payload.get("criterion_suggestions", [])),
+            "error": None,
+        }
+    if ai_validation_error is not None:
+        return {
+            "validation_status": "invalid",
+            "confidence": None,
+            "criterion_count": 0,
+            "error": ai_validation_error,
+        }
+    return {
+        "validation_status": "not_used",
+        "confidence": None,
+        "criterion_count": 0,
+        "error": None,
+    }
+
+
+def _disagreement_flags(
+    deterministic_payload: dict[str, Any],
+    ai_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if ai_payload is None:
+        return {"has_disagreement": False, "criterion_disagreements": []}
+    deterministic_scores: dict[str, Decimal] = deterministic_payload.get("criterion_scores", {})
+    disagreements: list[dict[str, str]] = []
+    for suggestion in ai_payload["criterion_suggestions"]:
+        criterion_key = suggestion["criterion_key"]
+        if criterion_key not in deterministic_scores:
+            continue
+        deterministic_score = deterministic_scores[criterion_key]
+        ai_score = Decimal(str(suggestion["score"]))
+        if ai_score != deterministic_score:
+            disagreements.append(
+                {
+                    "criterion_key": criterion_key,
+                    "deterministic_score": str(deterministic_score),
+                    "ai_score": str(ai_score),
+                }
+            )
+    return {
+        "has_disagreement": bool(disagreements),
+        "criterion_disagreements": disagreements,
+    }
+
+
+def _merge_confidence_policy_payload(
+    grading_result: GradingResult,
+    decision: ConfidencePolicyDecision,
+) -> None:
+    grading_result.explanation_payload["confidence_summary"] = {
+        **grading_result.explanation_payload.get("confidence_summary", {}),
+        "policy_confidence": str(decision.confidence) if decision.confidence is not None else None,
+        "confidence_band": decision.confidence_band,
+    }
+    grading_result.explanation_payload["routing"] = {
+        "decision": decision.decision,
+        "confidence_band": decision.confidence_band,
+        "reasons": decision.reasons,
+        "reviewer_summary": decision.reviewer_summary,
+        "retryable": decision.retryable,
+    }
+    grading_result.explanation_payload["review_reasons"] = decision.reasons
+    grading_result.explanation_payload["contributing_signals"] = copy.deepcopy(
+        decision.payload.get("contributing_signals", {})
+    )
+    grading_result.explanation_payload["blocking_signals"] = copy.deepcopy(decision.payload.get("blocking_signals", []))
+
+
+def _reviewer_summary(decision: str, reasons: list[str], confidence_band: str) -> str:
+    if decision == ROUTING_AUTO_ACCEPT:
+        return "Result met confidence, completeness, disagreement, and policy gates for auto-finalization."
+    if not reasons:
+        return f"Result routed to review with confidence band {confidence_band}."
+    reason = reasons[0]
+    summaries = {
+        REASON_MANDATORY_REVIEW_POLICY: "Policy requires teacher review regardless of confidence.",
+        REASON_AUTO_FINALIZE_DISABLED: "Auto-finalization is disabled by policy.",
+        REASON_AI_VALIDATION_FAILED: "AI output failed validation and cannot be used as authoritative scoring input.",
+        REASON_PARTIAL_GRADING: "The candidate result does not cover every required rubric criterion.",
+        REASON_RUBRIC_COVERAGE_INCOMPLETE: "Rubric coverage is incomplete.",
+        REASON_DETERMINISTIC_AI_DISAGREEMENT: "Deterministic and AI scoring signals disagree.",
+        REASON_CONFIDENCE_BELOW_THRESHOLD: "Aggregate confidence is below the auto-finalization threshold.",
+        REASON_CONFIDENCE_MISSING: "Aggregate confidence is missing.",
+    }
+    return summaries.get(reason, f"Result requires teacher review because of {reason}.")
 
 
 def _score_and_confidence(
@@ -752,12 +980,13 @@ def _confidence_decimal(value: Any, label: str) -> Decimal:
     return _decimal_between(value, lower=Decimal("0"), upper=Decimal("1"), label=label)
 
 
-def _confidence_band(confidence: Decimal | None) -> str:
+def _confidence_band(confidence: Decimal | None, *, policy: GradingPolicy | None = None) -> str:
+    policy = policy or GradingPolicy()
     if confidence is None:
         return CONFIDENCE_BLOCKED
-    if confidence >= Decimal("0.85"):
+    if confidence >= policy.confidence_threshold:
         return CONFIDENCE_HIGH
-    if confidence >= Decimal("0.70"):
+    if confidence >= policy.review_threshold:
         return CONFIDENCE_MEDIUM
     if confidence > Decimal("0"):
         return CONFIDENCE_LOW

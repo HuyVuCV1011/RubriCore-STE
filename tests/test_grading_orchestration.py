@@ -347,6 +347,105 @@ def test_low_confidence_ai_only_result_routes_to_review() -> None:
     assert outcome.review_task.escalation_reason == "partial_grading"
 
 
+def test_high_confidence_ai_only_full_coverage_can_auto_finalize() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    provider = FakeAIProvider(
+        {
+            "criterion_suggestions": [
+                {
+                    "criterion_key": "correctness",
+                    "score": "4",
+                    "confidence": "0.95",
+                    "explanation": "Complete and well supported.",
+                },
+                {
+                    "criterion_key": "clarity",
+                    "score": "2",
+                    "confidence": "0.95",
+                    "explanation": "Clear and direct.",
+                },
+            ],
+            "overall_feedback_draft": "Strong answer.",
+            "confidence": "0.95",
+        }
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        ai_provider=provider,
+        policy=GradingPolicy(ai_allowed=True),
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "finalized"
+    assert outcome.grading_result.confidence == Decimal("0.95")
+    assert outcome.grading_result.explanation_payload["routing"]["decision"] == "auto_accept"
+    assert outcome.review_task is None
+
+
+def test_mandatory_review_overrides_high_confidence() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        selected_levels_by_criterion={"correctness": "meets", "clarity": "meets"},
+        policy=GradingPolicy(mandatory_review=True),
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "needs_review"
+    assert outcome.grading_result.confidence == Decimal("1")
+    assert outcome.review_task is not None
+    assert outcome.review_task.escalation_reason == "mandatory_review_policy"
+    assert outcome.review_task.confidence_band == "high"
+    assert outcome.grading_result.explanation_payload["routing"]["reasons"] == ["mandatory_review_policy"]
+
+
+def test_high_confidence_incomplete_coverage_routes_to_review() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    provider = FakeAIProvider(
+        {
+            "criterion_suggestions": [
+                {
+                    "criterion_key": "correctness",
+                    "score": "4",
+                    "confidence": "0.97",
+                    "explanation": "Correct, but clarity is missing.",
+                }
+            ],
+            "overall_feedback_draft": "Incomplete rubric coverage.",
+            "confidence": "0.97",
+        }
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        ai_provider=provider,
+        policy=GradingPolicy(ai_allowed=True),
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "needs_review"
+    assert outcome.grading_result.confidence == Decimal("0.97")
+    assert outcome.review_task is not None
+    assert outcome.review_task.escalation_reason == "partial_grading"
+    assert "rubric_coverage_incomplete" in outcome.review_task.policy_payload["reasons"]
+    coverage = outcome.grading_result.explanation_payload["rubric_coverage_summary"]
+    assert coverage["missing_criterion_keys"] == ["clarity"]
+
+
 def test_validate_ai_output_rejects_unknown_criterion_and_out_of_range_confidence() -> None:
     submission = make_submission()
     rubric = make_rubric_version(submission)
