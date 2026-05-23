@@ -10,6 +10,7 @@ from app.db.models import (
     CriterionResult,
     GradingResult,
     GradingRun,
+    ReviewTask,
     RubricVersion,
     Submission,
     SubmissionEvidence,
@@ -185,6 +186,10 @@ def make_answer_key_version(
         key_payload=key_payload or {"accepted": ["Deterministic checks should run before AI."]},
         status=status,
     )
+
+
+def evidence_refs(submission: Submission) -> list[str]:
+    return [str(submission.evidence[0].id)]
 
 
 def records(session: RecordingSession, record_type: type) -> list:
@@ -386,6 +391,7 @@ def test_ai_is_invoked_after_deterministic_stage_and_validation_is_recorded() ->
                     "score": "4",
                     "confidence": "0.95",
                     "explanation": "Matches deterministic result.",
+                    "evidence_references": evidence_refs(submission),
                 }
             ],
             "overall_feedback_draft": "Strong answer.",
@@ -423,6 +429,7 @@ def test_deterministic_ai_disagreement_routes_to_review() -> None:
                     "score": "0",
                     "confidence": "0.99",
                     "explanation": "Disagrees with deterministic level.",
+                    "evidence_references": evidence_refs(submission),
                 }
             ],
             "overall_feedback_draft": "Needs review.",
@@ -482,6 +489,7 @@ def test_low_confidence_ai_only_result_routes_to_review() -> None:
                     "score": "1",
                     "confidence": "0.60",
                     "explanation": "Plausible but uncertain.",
+                    "evidence_references": evidence_refs(submission),
                 }
             ],
             "overall_feedback_draft": "Needs a teacher look.",
@@ -516,12 +524,14 @@ def test_high_confidence_ai_only_full_coverage_can_auto_finalize() -> None:
                     "score": "4",
                     "confidence": "0.95",
                     "explanation": "Complete and well supported.",
+                    "evidence_references": evidence_refs(submission),
                 },
                 {
                     "criterion_key": "clarity",
                     "score": "2",
                     "confidence": "0.95",
                     "explanation": "Clear and direct.",
+                    "evidence_references": evidence_refs(submission),
                 },
             ],
             "overall_feedback_draft": "Strong answer.",
@@ -542,6 +552,48 @@ def test_high_confidence_ai_only_full_coverage_can_auto_finalize() -> None:
     assert outcome.grading_result.confidence == Decimal("0.95")
     assert outcome.grading_result.explanation_payload["routing"]["decision"] == "auto_accept"
     assert outcome.review_task is None
+
+
+def test_medium_confidence_ai_only_full_coverage_routes_to_review() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    provider = FakeAIProvider(
+        {
+            "criterion_suggestions": [
+                {
+                    "criterion_key": "correctness",
+                    "score": "4",
+                    "confidence": "0.82",
+                    "explanation": "Likely correct but not high-confidence.",
+                    "evidence_references": evidence_refs(submission),
+                },
+                {
+                    "criterion_key": "clarity",
+                    "score": "2",
+                    "confidence": "0.82",
+                    "explanation": "Clear enough but not high-confidence.",
+                    "evidence_references": evidence_refs(submission),
+                },
+            ],
+            "overall_feedback_draft": "Plausible answer.",
+            "confidence": "0.82",
+        }
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        ai_provider=provider,
+        policy=GradingPolicy(ai_allowed=True),
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "needs_review"
+    assert outcome.review_task is not None
+    assert outcome.review_task.confidence_band == "medium"
+    assert outcome.review_task.escalation_reason == "confidence_below_threshold"
 
 
 def test_mandatory_review_overrides_high_confidence() -> None:
@@ -566,6 +618,40 @@ def test_mandatory_review_overrides_high_confidence() -> None:
     assert outcome.grading_result.explanation_payload["routing"]["reasons"] == ["mandatory_review_policy"]
 
 
+def test_review_routing_reuses_existing_open_review_task_for_result() -> None:
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    existing_task = ReviewTask(
+        id=uuid.uuid4(),
+        organization_id=submission.organization_id,
+        assessment_id=submission.assessment_id,
+        assessment_item_id=submission.assessment_item_id,
+        submission_id=submission.id,
+        grading_run_id=uuid.uuid4(),
+        grading_result_id=uuid.uuid4(),
+        status="open",
+        priority="normal",
+        confidence_band="low",
+        escalation_reason="old_reason",
+        policy_payload={"reasons": ["old_reason"]},
+    )
+    session = RecordingSession(scalar_results=[existing_task])
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        selected_levels_by_criterion={"correctness": "meets", "clarity": "meets"},
+        policy=GradingPolicy(mandatory_review=True),
+    )
+
+    assert outcome.review_task is existing_task
+    assert existing_task.escalation_reason == "mandatory_review_policy"
+    assert existing_task.confidence_band == "high"
+    assert existing_task.policy_payload["duplicate_routing_reused"] is True
+    assert len(records(session, ReviewTask)) == 0
+
+
 def test_high_confidence_incomplete_coverage_routes_to_review() -> None:
     session = RecordingSession()
     submission = make_submission()
@@ -578,6 +664,7 @@ def test_high_confidence_incomplete_coverage_routes_to_review() -> None:
                     "score": "4",
                     "confidence": "0.97",
                     "explanation": "Correct, but clarity is missing.",
+                    "evidence_references": evidence_refs(submission),
                 }
             ],
             "overall_feedback_draft": "Incomplete rubric coverage.",
@@ -601,6 +688,85 @@ def test_high_confidence_incomplete_coverage_routes_to_review() -> None:
     assert "rubric_coverage_incomplete" in outcome.review_task.policy_payload["reasons"]
     coverage = outcome.grading_result.explanation_payload["rubric_coverage_summary"]
     assert coverage["missing_criterion_keys"] == ["clarity"]
+
+
+def test_ai_output_without_evidence_references_routes_to_review() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    provider = FakeAIProvider(
+        {
+            "criterion_suggestions": [
+                {
+                    "criterion_key": "correctness",
+                    "score": "4",
+                    "confidence": "0.95",
+                    "explanation": "No evidence reference.",
+                },
+                {
+                    "criterion_key": "clarity",
+                    "score": "2",
+                    "confidence": "0.95",
+                    "explanation": "No evidence reference.",
+                },
+            ],
+            "overall_feedback_draft": "Missing evidence links.",
+            "confidence": "0.95",
+        }
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        ai_provider=provider,
+        policy=GradingPolicy(ai_allowed=True),
+    )
+
+    assert outcome.ai_interaction is not None
+    assert outcome.ai_interaction.validation_status == "invalid"
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "needs_review"
+    assert outcome.review_task is not None
+    assert outcome.review_task.escalation_reason == "ai_validation_failed"
+    assert "ai_output.validation_failed" in [event.action for event in records(session, AuditEvent)]
+    assert all(record.source != "ai" for record in records(session, CriterionResult))
+
+
+def test_optional_invalid_ai_does_not_block_complete_deterministic_finalization() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    provider = FakeAIProvider(
+        {
+            "criterion_suggestions": [
+                {
+                    "criterion_key": "correctness",
+                    "score": "4",
+                    "confidence": "0.95",
+                    "explanation": "Missing evidence references makes this invalid.",
+                }
+            ],
+            "confidence": "0.95",
+        }
+    )
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        selected_levels_by_criterion={"correctness": "meets", "clarity": "meets"},
+        ai_provider=provider,
+        policy=GradingPolicy(ai_allowed=True, ai_required=False),
+    )
+
+    assert outcome.ai_interaction is not None
+    assert outcome.ai_interaction.validation_status == "invalid"
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "finalized"
+    assert outcome.review_task is None
+    assert "ai_output.validation_failed" in [event.action for event in records(session, AuditEvent)]
+    assert outcome.grading_result.explanation_payload["ai_validation_summary"]["validation_status"] == "invalid"
 
 
 def test_validate_ai_output_rejects_unknown_criterion_and_out_of_range_confidence() -> None:
@@ -709,9 +875,7 @@ def test_answer_key_accepted_variants_selects_deterministic_level_before_ai() ->
     assert outcome.grading_result is not None
     assert outcome.grading_result.status == "finalized"
     assert outcome.grading_result.total_score == Decimal("6")
-    correctness = [
-        record for record in records(session, CriterionResult) if record.criterion_key == "correctness"
-    ][0]
+    correctness = [record for record in records(session, CriterionResult) if record.criterion_key == "correctness"][0]
     assert correctness.score == Decimal("4")
     assert correctness.metadata_payload["answer_key_finding"]["matched"] is True
     assert correctness.metadata_payload["answer_key_finding"]["rule_type"] == "accepted_variants"
@@ -748,9 +912,7 @@ def test_answer_key_miss_selects_incorrect_level_and_can_finalize_when_coverage_
     assert outcome.grading_result is not None
     assert outcome.grading_result.status == "finalized"
     assert outcome.grading_result.total_score == Decimal("2")
-    correctness = [
-        record for record in records(session, CriterionResult) if record.criterion_key == "correctness"
-    ][0]
+    correctness = [record for record in records(session, CriterionResult) if record.criterion_key == "correctness"][0]
     assert correctness.score == Decimal("0")
     assert correctness.metadata_payload["selected_level"] == "needs_revision"
     assert correctness.metadata_payload["answer_key_finding"]["matched"] is False
@@ -791,9 +953,7 @@ def test_answer_key_numeric_tolerance_uses_structured_evidence_payload() -> None
     assert outcome.grading_result is not None
     assert outcome.grading_result.status == "finalized"
     assert outcome.grading_result.total_score == Decimal("6")
-    correctness = [
-        record for record in records(session, CriterionResult) if record.criterion_key == "correctness"
-    ][0]
+    correctness = [record for record in records(session, CriterionResult) if record.criterion_key == "correctness"][0]
     assert correctness.metadata_payload["answer_key_finding"]["observed_value"] == "3.14"
     assert correctness.metadata_payload["answer_key_finding"]["matched"] is True
 
@@ -817,3 +977,25 @@ def test_answer_key_without_supported_rules_routes_to_review() -> None:
     assert outcome.review_task is not None
     assert outcome.review_task.escalation_reason == "partial_grading"
     assert "answer_key_no_rules" in outcome.review_task.policy_payload["reasons"]
+
+
+def test_answer_key_warning_routes_to_review_even_when_manual_coverage_is_complete() -> None:
+    session = RecordingSession()
+    submission = make_submission()
+    rubric = make_rubric_version(submission)
+    answer_key = make_answer_key_version(submission, key_payload={"notes": "No deterministic rule."})
+
+    outcome = orchestrate_grading(
+        session,
+        submission=submission,
+        rubric_version=rubric,
+        answer_key_version=answer_key,
+        answer_key_required=True,
+        selected_levels_by_criterion={"correctness": "meets", "clarity": "meets"},
+    )
+
+    assert outcome.grading_result is not None
+    assert outcome.grading_result.status == "needs_review"
+    assert outcome.review_task is not None
+    assert outcome.review_task.escalation_reason == "answer_key_no_rules"
+    assert outcome.review_task.confidence_band == "high"

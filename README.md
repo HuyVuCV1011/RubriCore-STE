@@ -98,6 +98,7 @@ The project is not yet a complete production application or user-facing grading 
 | [docs/logic/04-answer-lifecycle.md](docs/logic/04-answer-lifecycle.md) | Submitted answer package immutability, revisions, regrades, and superseding |
 | [docs/logic/05-grading-orchestration.md](docs/logic/05-grading-orchestration.md) | Grading runs, deterministic-first execution, AI validation, confidence routing, and review tasks |
 | [docs/logic/06-confidence-policy.md](docs/logic/06-confidence-policy.md) | Confidence bands, routing gates, review escalation, and auditable policy payloads |
+| [docs/logic/07-review-policy.md](docs/logic/07-review-policy.md) | Teacher review decisions, overrides, regrade returns, finalization, and audit trail |
 
 ## Quick Start
 

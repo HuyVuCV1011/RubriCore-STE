@@ -23,6 +23,8 @@ The current backend slice adds `app.db.services.grading_orchestration` with a na
 
 | Operation | Purpose |
 | --- | --- |
+| `resolve_grading_context` | Resolve the published rubric version and required answer key version before run creation |
+| `orchestrate_grading_for_submission` | Resolve grading context for a submission, then start and execute one grading run |
 | `start_grading_run` | Validate prerequisites, resolve fixed context, create a queued `GradingRun`, and audit creation |
 | `execute_grading_run` | Run deterministic scoring, optional AI validation, result creation, routing, and completion/failure audit |
 | `orchestrate_grading` | Convenience flow that starts and executes one grading run |
@@ -41,6 +43,8 @@ A grading run requires:
 - published `AnswerKeyVersion` when answer-key deterministic grading is required
 - grading policy or default policy
 - trigger source and optional triggering user
+
+Rubric context is resolved by explicit `RubricVersion` first, then active assessment-item `RubricBinding`, then active assessment-level `RubricBinding`. If answer-key grading is required and no explicit answer key is provided, Phase 1 resolves the latest published answer key version for the submission's assessment item.
 
 The exact rubric version and answer key version are copied onto the `GradingRun` and `GradingResult`. A later rubric binding or answer-key change should create a new run rather than mutating an in-progress or historical run.
 
@@ -67,14 +71,14 @@ flowchart TD
 
 ## Deterministic First
 
-Deterministic scoring runs before AI. In the current slice, deterministic rubric scoring accepts selected performance levels by criterion and computes:
+Deterministic scoring runs before AI. In the current slice, deterministic rubric scoring accepts selected performance levels by criterion and can also derive levels from answer-key rules. Supported Phase 1 answer-key rule shapes include exact text, normalized text, accepted variants, numeric exact, numeric tolerance, and regex checks. Deterministic scoring computes:
 
 - per-criterion weighted scores
 - total score
 - maximum possible score
 - deterministic confidence signal
 
-The service does not ask AI to choose or override deterministic facts before those facts are recorded. If deterministic and AI scores disagree, the result routes to teacher review.
+Answer-key findings are persisted in criterion metadata when used. The service does not ask AI to choose or override deterministic facts before those facts are recorded. If deterministic and AI scores disagree, the result routes to teacher review.
 
 ## AI Boundary
 
@@ -94,8 +98,9 @@ AI output must include structured criterion suggestions. Each suggestion is vali
 - criterion-specific weighted maximum score
 - confidence range from 0 to 1
 - required explanation text
+- evidence reference shape, and known submitted evidence IDs when the provider was given a bounded evidence-reference set
 
-Invalid AI output is not used for authoritative scores. It is preserved as an invalid interaction and routes the result to review when the case remains reviewable.
+Invalid AI output is not used for authoritative scores. It is preserved as an invalid interaction and audited. If AI is required, or deterministic scoring does not already provide complete rubric coverage, invalid AI output routes the result to review; otherwise complete deterministic scoring can still pass the normal policy gates.
 
 ## Confidence and Review Routing
 
@@ -107,6 +112,7 @@ The result may auto-finalize only when:
 - deterministic checks completed
 - AI output is valid when AI is required or used for scoring
 - required rubric criteria are covered by deterministic or valid AI results
+- AI evidence references validate when AI contributes scoring
 - all scores are inside rubric bounds
 - confidence meets the configured threshold
 - no mandatory review policy applies
@@ -118,7 +124,7 @@ The service creates a `ReviewTask` when:
 - required rubric coverage is incomplete
 - AI output is invalid or failed while AI is required
 - deterministic and AI outputs disagree
-- deterministic scoring is partial or blocked
+- deterministic scoring is partial, blocked, or warning-bearing
 - policy disables auto-finalization
 - policy requires review
 
@@ -151,7 +157,7 @@ Run the full suite:
 .venv/bin/pytest
 ```
 
-The current tests cover prerequisite validation, answer-key-required behavior, deterministic auto-finalization, AI validation, deterministic/AI disagreement routing, invalid AI output routing, low-confidence review routing, full-coverage AI-only finalization, mandatory review gates, incomplete coverage review routing, and run/result context persistence.
+The current tests cover prerequisite validation, context resolution, answer-key-required behavior, answer-key deterministic rules, deterministic auto-finalization, AI validation, deterministic/AI disagreement routing, invalid AI output routing, low-confidence review routing, full-coverage AI-only finalization, evidence-reference validation, optional invalid AI behavior, mandatory review gates, incomplete coverage review routing, deterministic warning routing, and run/result context persistence.
 
 ## Phase 1 Limits
 

@@ -442,7 +442,12 @@ def execute_grading_run(
         raise
 
 
-def validate_ai_output(ai_output: dict[str, Any], *, rubric_version: RubricVersion) -> dict[str, Any]:
+def validate_ai_output(
+    ai_output: dict[str, Any],
+    *,
+    rubric_version: RubricVersion,
+    evidence_reference_ids: set[str] | None = None,
+) -> dict[str, Any]:
     if not isinstance(ai_output, dict):
         raise AIOutputValidationError("AI output must be an object.")
 
@@ -458,6 +463,8 @@ def validate_ai_output(ai_output: dict[str, Any], *, rubric_version: RubricVersi
         if not isinstance(suggestion, dict):
             raise AIOutputValidationError("Every AI criterion suggestion must be an object.")
         criterion_key = suggestion.get("criterion_key")
+        if not isinstance(criterion_key, str):
+            raise AIOutputValidationError("Every AI criterion suggestion requires a criterion_key.")
         if criterion_key not in criterion_keys:
             raise AIOutputValidationError(f"AI output references unknown criterion {criterion_key!r}.")
         max_score = criterion_max_scores[criterion_key]
@@ -471,10 +478,16 @@ def validate_ai_output(ai_output: dict[str, Any], *, rubric_version: RubricVersi
         explanation = suggestion.get("explanation")
         if not isinstance(explanation, str) or not explanation.strip():
             raise AIOutputValidationError(f"AI suggestion for {criterion_key!r} requires an explanation.")
+        evidence_references = _validate_ai_evidence_references(
+            suggestion.get("evidence_references", []),
+            criterion_key=criterion_key,
+            allowed_reference_ids=evidence_reference_ids,
+        )
         normalized = copy.deepcopy(suggestion)
         normalized["score"] = str(score)
         normalized["max_score"] = str(max_score)
         normalized["confidence"] = str(confidence)
+        normalized["evidence_references"] = evidence_references
         normalized_suggestions.append(normalized)
 
     confidence = _confidence_decimal(ai_output.get("confidence"), "AI aggregate confidence")
@@ -688,6 +701,28 @@ def _decimal_or_none(value: Any) -> Decimal | None:
         return None
 
 
+def _validate_ai_evidence_references(
+    references: Any,
+    *,
+    criterion_key: str,
+    allowed_reference_ids: set[str] | None,
+) -> list[str]:
+    if not isinstance(references, list):
+        raise AIOutputValidationError(f"AI suggestion for {criterion_key!r} requires evidence_references as a list.")
+    normalized = [str(reference) for reference in references if str(reference).strip()]
+    if allowed_reference_ids is None:
+        return normalized
+    if not normalized:
+        raise AIOutputValidationError(f"AI suggestion for {criterion_key!r} requires at least one evidence reference.")
+    unknown_references = sorted(set(normalized) - allowed_reference_ids)
+    if unknown_references:
+        formatted = ", ".join(unknown_references)
+        raise AIOutputValidationError(
+            f"AI suggestion for {criterion_key!r} references unknown submitted evidence: {formatted}."
+        )
+    return normalized
+
+
 def _answer_key_explanation(*, rule_type: str, matched: bool) -> str:
     state = "matched" if matched else "did not match"
     return f"Answer key {rule_type} rule {state} submitted evidence."
@@ -730,12 +765,32 @@ def _invoke_and_validate_ai(
     try:
         raw_output = ai_provider.evaluate(request_payload)
         interaction.response_payload = copy.deepcopy(raw_output)
-        validated = validate_ai_output(raw_output, rubric_version=rubric_version)
+        validated = validate_ai_output(
+            raw_output,
+            rubric_version=rubric_version,
+            evidence_reference_ids=_submission_evidence_reference_ids(submission),
+        )
         interaction.validation_status = "valid"
         return interaction, validated, None
     except AIOutputValidationError as exc:
         interaction.validation_status = "invalid"
         interaction.error_message = str(exc)
+        _audit_grading_event(
+            db,
+            submission=submission,
+            grading_run=grading_run,
+            action="ai_output.validation_failed",
+            actor_user_id=grading_run.triggered_by_user_id,
+            actor_source=grading_run.trigger_source,
+            previous_state={"validation_status": "pending"},
+            new_state={
+                "ai_interaction_id": str(interaction.id),
+                "validation_status": interaction.validation_status,
+                "error": interaction.error_message,
+            },
+            reason=REASON_AI_VALIDATION_FAILED,
+            request_id=grading_run.context_payload.get("request_id"),
+        )
         return interaction, None, str(exc)
     except Exception as exc:
         interaction.validation_status = "failed"
@@ -845,6 +900,22 @@ def _apply_routing_policy(
 
     grading_result.status = GRADING_RESULT_NEEDS_REVIEW
     _merge_confidence_policy_payload(grading_result, decision)
+    existing_review_task = _open_review_task_for_result(
+        db,
+        organization_id=submission.organization_id,
+        grading_result_id=grading_result.id,
+    )
+    if existing_review_task is not None:
+        existing_review_task.confidence_band = decision.confidence_band
+        existing_review_task.escalation_reason = decision.reasons[0]
+        existing_review_task.priority = decision.review_priority
+        existing_review_task.policy_payload = {
+            **copy.deepcopy(decision.payload),
+            "grading_policy_version": policy.grading_policy_version,
+            "duplicate_routing_reused": True,
+        }
+        return existing_review_task
+
     review_task = ReviewTask(
         organization_id=submission.organization_id,
         assessment_id=submission.assessment_id,
@@ -880,6 +951,28 @@ def _apply_routing_policy(
         request_id=grading_run.context_payload.get("request_id"),
     )
     return review_task
+
+
+def _open_review_task_for_result(
+    db: GradingSession,
+    *,
+    organization_id: UUID,
+    grading_result_id: UUID | None,
+) -> ReviewTask | None:
+    if grading_result_id is None:
+        return None
+    existing = db.scalar(
+        select(ReviewTask)
+        .where(ReviewTask.organization_id == organization_id)
+        .where(ReviewTask.grading_result_id == grading_result_id)
+        .where(ReviewTask.status.in_(("open", "assigned")))
+        .order_by(ReviewTask.created_at.desc())
+    )
+    if existing is None:
+        return None
+    if not isinstance(existing, ReviewTask):
+        raise GradingOrchestrationError("Review task lookup returned an unexpected record type.")
+    return existing
 
 
 def _add_criterion_results(
@@ -962,7 +1055,8 @@ def _evaluate_confidence_policy(
     reasons: list[str] = []
     if policy.mandatory_review:
         reasons.append(REASON_MANDATORY_REVIEW_POLICY)
-    if ai_validation_error is not None:
+    deterministic_coverage = _coverage_summary_from_payloads(deterministic_payload, None)
+    if ai_validation_error is not None and (policy.ai_required or not deterministic_coverage["coverage_complete"]):
         reasons.append(REASON_AI_VALIDATION_FAILED)
     if policy.ai_required and ai_payload is None:
         reasons.append(REASON_AI_VALIDATION_FAILED)
@@ -978,8 +1072,10 @@ def _evaluate_confidence_policy(
         reasons.append(REASON_CONFIDENCE_MISSING)
     elif grading_result.confidence < policy.confidence_threshold:
         reasons.append(REASON_CONFIDENCE_BELOW_THRESHOLD)
-    if deterministic_payload.get("warnings") and not coverage_summary["coverage_complete"]:
-        reasons.extend(deterministic_payload["warnings"])
+    for warning in deterministic_payload.get("warnings", []):
+        if warning == REASON_PARTIAL_GRADING and coverage_summary["coverage_complete"]:
+            continue
+        reasons.append(warning)
 
     reasons = _dedupe(reasons)
     confidence_band = _confidence_band(grading_result.confidence, policy=policy)
@@ -1392,6 +1488,18 @@ def _submission_evidence_payload(submission: Submission) -> list[dict[str, Any]]
         }
         for evidence in submission.evidence
     ]
+
+
+def _submission_evidence_reference_ids(submission: Submission) -> set[str]:
+    reference_ids: set[str] = set()
+    for evidence in submission.evidence:
+        if evidence.id is not None:
+            reference_ids.add(str(evidence.id))
+        if evidence.file_artifact_id is not None:
+            reference_ids.add(str(evidence.file_artifact_id))
+        if evidence.evidence_extraction_id is not None:
+            reference_ids.add(str(evidence.evidence_extraction_id))
+    return reference_ids
 
 
 def _audit_grading_event(

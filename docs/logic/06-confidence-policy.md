@@ -60,6 +60,7 @@ The policy can use:
 - validated AI aggregate confidence
 - valid AI criterion confidence
 - rubric criterion coverage
+- evidence references to submitted evidence
 - structured AI validation status
 - deterministic/AI score agreement
 - mandatory review policy
@@ -75,6 +76,7 @@ A result may auto-finalize only when:
 - deterministic checks completed
 - AI output is valid when AI is required or used for scoring
 - all required rubric criteria are covered by deterministic or valid AI results
+- AI criterion suggestions include evidence references to submitted evidence when AI contributes scoring
 - scores are within rubric bounds
 - confidence is in the `high` band
 - no deterministic/AI disagreement exists
@@ -89,6 +91,7 @@ The service creates a `ReviewTask` when:
 - AI output fails validation
 - AI is required but no valid AI payload exists
 - deterministic and AI scoring disagree
+- deterministic warnings are present
 - mandatory review is enabled
 - auto-finalization is disabled
 
@@ -121,6 +124,8 @@ Review tasks preserve confidence band, escalation reason, policy payload, gradin
 
 This keeps confidence explainable without requiring reviewers or auditors to reconstruct decisions from raw provider output.
 
+Invalid optional AI output is still recorded and audited. It does not block finalization when deterministic scoring is complete and all non-AI confidence gates pass.
+
 ## Current Verification
 
 Run confidence-related grading tests:
@@ -135,7 +140,7 @@ Run the full suite:
 .venv/bin/pytest
 ```
 
-The current tests cover high-confidence auto-finalization, low-confidence review routing, AI-only full-coverage finalization, mandatory review overriding high confidence, incomplete rubric coverage overriding high confidence, invalid AI output routing, and deterministic/AI disagreement routing.
+The current tests cover high-confidence auto-finalization, low-confidence review routing, AI-only full-coverage finalization, mandatory review overriding high confidence, incomplete rubric coverage overriding high confidence, invalid AI output routing, deterministic/AI disagreement routing, evidence-reference validation, optional invalid AI with complete deterministic scoring, medium-confidence review routing, and deterministic warning routing.
 
 ## Phase 1 Limits
 
@@ -148,5 +153,6 @@ This slice intentionally defers:
 - reviewer sampling programs
 - advanced score-boundary policies
 - subject-specific confidence formulas
+- automated AI retry budgeting
 
 Phase 1 favors a small, explicit gate-based confidence policy over hidden scoring formulas.
