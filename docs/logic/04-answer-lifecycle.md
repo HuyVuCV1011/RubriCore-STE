@@ -2,6 +2,8 @@
 
 Phase 1 treats a learner answer as an immutable answer package once submitted.
 
+Grading orchestration for submitted packages is described in [Grading Orchestration Logic](05-grading-orchestration.md).
+
 ## Implemented States
 
 Submission package states:
@@ -29,6 +31,8 @@ New lifecycle code should not treat those compatibility statuses as authoritativ
 - New grading results explicitly supersede older grading results.
 - Important lifecycle actions create audit events.
 - Deterministic intake validation runs before AI-assisted processing.
+- Grading execution state belongs to `GradingRun`, not `Submission`.
+- Finalization state belongs to `GradingResult`, not `Submission`.
 
 ## Verification
 

@@ -1,38 +1,61 @@
 # Test Fixtures
 
-Fixture sets are grouped by privacy level and by assignment scenario.
+RubriCore-STE fixtures model assessment materials, answer-key sources, and learner submission evidence without exposing real learner data.
 
-- `private/`: local-only real or sensitive materials. This directory is ignored by Git.
-- `public/`: sanitized sample materials that may be committed for GitHub users.
-
-Tests should prefer a private fixture set when it exists locally and fall back to the matching public fixture set when running from a clean clone.
-
-## Fixture Layout
-
-Use the same purpose-based layout for public and private fixture sets:
+## Layout
 
 ```text
+tests/fixtures/
+├── public/              # Synthetic, sanitized, commit-safe fixtures
+└── private/             # Local-only sensitive fixtures; ignored by Git
+
 <fixture_set>/
-  assessment_materials/
-  answer_key_sources/
-  submission_evidence/
+├── assessment_materials/
+├── answer_key_sources/
+└── submission_evidence/
 ```
 
-Fixture files should be classified by purpose, not only by extension. A PDF, text file, code file, spreadsheet, archive, or other artifact may represent assignment material, an answer key source, a learner submission, or a reference solution depending on context.
+Fixture files are classified by workflow purpose, not by extension. A `.pdf`, `.py`, `.csv`, image, spreadsheet, archive, or text file can be assessment material, an answer-key source, submitted learner evidence, or a reference artifact depending on how it enters the assessment workflow.
 
 ## Public Fixtures
 
 Public fixtures must be synthetic, sanitized, and safe to commit.
 
+Use public fixtures for:
+
+- repeatable unit tests
+- documentation examples
+- public demos
+- CI-safe grading and artifact-provenance checks
+
 Do not commit:
 
-- real student data
+- real student work
 - private answer keys
 - private prompts
 - credentials or API keys
 - confidential teaching materials
 - unpublished evaluation datasets
+- sensitive school, learner, or teacher information
 
 ## Private Fixtures
 
-Private fixtures are for local-only testing with sensitive or real-world materials. Keep them ignored by Git and avoid documenting personally identifying source details in tracked files.
+Private fixtures are local-only materials for testing with sensitive or real-world examples.
+
+Rules:
+
+- keep them ignored by Git
+- do not document personally identifying details in tracked files
+- prefer a matching public fixture fallback for automated tests
+- never require private fixtures for CI or clean-clone verification
+
+## Test Strategy
+
+Tests should prefer this pattern:
+
+1. Use a private fixture only when it exists locally and the test is explicitly local/private.
+2. Fall back to the matching public fixture for normal development and CI.
+3. Assert artifact purpose and provenance explicitly.
+4. Avoid deriving fixture role from file extension alone.
+
+This keeps the public test suite useful while preserving the project’s data-safety boundary.

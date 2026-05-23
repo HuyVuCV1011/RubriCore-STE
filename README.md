@@ -4,152 +4,135 @@ RubriCore-STE is a Python-first, subject-agnostic assessment core for rubric-dri
 
 It is built for learning environments where student work may be a selected option, a number, a paragraph, code, a spreadsheet, a document, a visual artifact, or a mixed evidence bundle.
 
-## Why It Exists
-
-Most grading tools become brittle when work is open-ended, cross-disciplinary, or partly automated. RubriCore-STE separates the core assessment lifecycle from subject-specific assumptions:
-
-| Instead of | RubriCore-STE uses |
-| --- | --- |
-| Hard-coded subjects | Portable subject packs |
-| One grading method | Deterministic checks, AI suggestions, and teacher review |
-| Hidden rubric changes | Immutable published rubric and answer key versions |
-| File-type guesswork | Purpose-based artifact classification |
-| Untraceable AI output | Structured validation, citations, and audit events |
-
-## Product Shape
+## What It Does
 
 ```mermaid
 flowchart LR
-    A["Teacher creates assessment"] --> B["Rubric and answer key versions"]
-    B --> C["Learner submits evidence"]
+    A["Assessment item"] --> B["Published rubric version"]
+    B --> C["Submitted evidence"]
     C --> D["Deterministic checks"]
-    D --> E{"Needs judgment?"}
-    E -- "No" --> F["Finalize when policy allows"]
-    E -- "Yes" --> G["AI-assisted suggestion or teacher review"]
-    G --> H["Teacher decision"]
-    H --> I["Audit trail"]
-    J["Knowledge library"] --> G
+    D --> E{"AI allowed and needed?"}
+    E -- "No" --> F["Explainable result"]
+    E -- "Yes" --> G["Structured AI suggestion"]
+    G --> H["Schema validation"]
+    H --> F
+    F --> I{"Confidence and policy"}
+    I -- "Pass" --> J["Finalized result"]
+    I -- "Review" --> K["Teacher review task"]
+    J --> L["Audit trail"]
+    K --> L
 ```
 
-## Core Ideas
+RubriCore-STE keeps the core workflow deliberately explicit:
 
-| Concept | Purpose |
+1. A learner submits an immutable answer package.
+2. The system resolves the exact published rubric and answer-key versions.
+3. Deterministic checks run before AI.
+4. AI can assist only through a structured, validated boundary.
+5. Confidence and policy decide whether a result can finalize or needs teacher review.
+6. Results, review decisions, overrides, and superseding are preserved for audit.
+
+## Why It Exists
+
+Most grading systems become brittle when work is open-ended, cross-disciplinary, or partly automated. RubriCore-STE separates core assessment logic from subject-specific assumptions.
+
+| Instead of | RubriCore-STE uses |
 | --- | --- |
-| Assessment types | Describe the task: quiz, short answer, code assignment, lab report, project, critique |
-| Evidence types | Describe the submitted work: text, number, file, code, image, audio, video, table, bundle |
-| Rubric types | Describe the scoring shape: binary key, checklist, analytic, holistic, weighted criteria |
-| Subject packs | Add discipline-specific configuration without changing the core lifecycle |
-| Knowledge sources | Store reusable teacher guidance as Markdown or converted artifacts |
-| Review tasks | Route uncertainty, ambiguity, low confidence, and policy-sensitive cases to teachers |
-| Audit events | Preserve who did what, why, and with which grading context |
+| Hard-coded subjects | Portable subject packs and taxonomy values |
+| One grading method | Deterministic checks, structured AI assistance, and teacher review |
+| Hidden scoring changes | Immutable published rubric and answer-key versions |
+| File-type guesswork | Purpose-based artifact classification |
+| Model-only decisions | Validated outputs, confidence routing, and audit events |
+| Rewriting history | New runs, superseded results, and review records |
 
-## Rubric Framework
+## Current Backend Slice
 
-The first production-ready rubric framework is implemented in the backend model and service layer. It keeps the existing versioned JSON rubric snapshot for durable audit records, and adds normalized structures so scoring logic can be inspected without AI.
+This repository is in early Phase 1 development. The current public backend foundation includes:
 
-| Entity | Purpose |
+| Area | Implemented shape |
 | --- | --- |
-| `Rubric` | Stable rubric identity with title, optional slug, lifecycle status, draft schema, and subject-agnostic metadata |
-| `RubricVersion` | Immutable published snapshot with version number, source metadata, publisher, and schema payload |
-| `RubricCriterion` | Ordered criterion or dimension with key, label, description, optional weight, and deterministic hints |
-| `PerformanceLevel` | Ordered score band with key, label, description, and numeric score |
-| `RubricDescriptor` | Narrative expectation for each criterion x performance-level pair |
-| `RubricBinding` | Active link from a published rubric version to an assessment, assessment item, or external evaluation context |
+| Database foundation | SQLAlchemy models, Alembic migration, PostgreSQL-oriented schema |
+| Taxonomy | Assessment, evidence, output, rubric, and file-purpose vocabulary |
+| Rubrics | Draft rubrics, immutable published versions, materialized criteria, levels, descriptors, and bindings |
+| Answer lifecycle | Draft, submitted, superseded, withdrawn, and archived answer packages |
+| Evidence | Submission evidence records and artifact provenance model |
+| Grading orchestration | Run creation, deterministic scoring, optional AI interaction records, confidence routing, review tasks, and audit events |
+| Review | Review task, teacher review, and teacher override records |
+| Fixtures | Public-safe synthetic Python score-summary assignment fixture |
+| Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, and grading orchestration |
 
-Lifecycle expectations:
-
-1. Teachers or fixture importers edit `Rubric.draft_schema`.
-2. Publishing validates the schema, creates the next immutable `RubricVersion`, and materializes criteria, levels, and descriptors.
-3. A binding attaches a published version to an assessment context without mutating the version.
-4. Future grading runs can reference the bound version, while teacher review and audit records can explain exactly which criteria, levels, descriptors, and selected score bands were used.
-
-Rubric validation is deterministic and runs before any AI layer. The service checks required criteria, levels, ordering, non-negative level scores, positive weights, and descriptor completeness across every criterion x level pair. The deterministic scoring helper computes weighted totals from selected performance levels and works without a provider, prompt, or model.
-
-The local seed command creates a synthetic demo rubric for the public Python score-summary fixture:
-
-```sh
-uv run python scripts/seed_dev.py
-```
-
-## Current Status
-
-This repository is in early Phase 1 development. The public foundation currently includes:
-
-| Area | Status |
-| --- | --- |
-| Backend foundation | Python package, SQLAlchemy models, Alembic migrations |
-| Database model | Organizations, users, learners, assessments, rubrics, answer keys, submissions, grading, review, audit |
-| Knowledge foundation | Source artifacts, access scopes, knowledge sources, chunks, recommendations, usage events |
-| Fixtures | Public-safe synthetic Python assignment fixture |
-| Documentation | Setup guide, design principles, combined use cases and case studies |
-
-The project is not yet a complete production application.
+The project is not yet a complete production application or user-facing grading UI.
 
 ## Repository Map
 
 ```text
 .
-├── app/                  # Python backend application package
-│   └── db/               # SQLAlchemy models, session setup, seed helpers
+├── app/
+│   └── db/
+│       ├── models/       # SQLAlchemy domain models
+│       └── services/     # Rubric, answer lifecycle, and grading orchestration services
 ├── alembic/              # Database migrations
-├── docs/                 # Public documentation
-│   ├── setup.md          # Development setup guide
-│   ├── design-system.md  # Product and system design principles
+├── docs/
+│   ├── setup.md
+│   ├── design-system.md
 │   ├── use-cases-and-case-studies.md
-│   └── logic/            # Public system logic and workflow docs
-│       ├── 01-setupdb.md
-│       ├── 02-assessment-taxonomy.md
-│       └── 03-rubric-framework.md
+│   └── logic/            # Public architecture and workflow logic
+├── private-docs/         # Local/private design docs; ignored by Git
 ├── scripts/              # Development helper scripts
-├── tests/                # Public fixtures and future tests
-├── .env.example          # Local environment template
-├── alembic.ini           # Alembic configuration
-├── requirements.txt      # Python dependencies
+├── tests/                # Unit tests and synthetic fixtures
+├── pyproject.toml
+├── requirements.txt
 └── README.md
 ```
 
 ## Start Here
 
-Read these first:
-
 | Document | Use it for |
 | --- | --- |
 | [docs/setup.md](docs/setup.md) | Local environment and database setup |
-| [docs/design-system.md](docs/design-system.md) | Product principles and architecture intent |
-| [docs/use-cases-and-case-studies.md](docs/use-cases-and-case-studies.md) | Concise use cases, step-by-step case studies, and flowcharts |
-| [docs/logic/01-setupdb.md](docs/logic/01-setupdb.md) | Public database model, artifact provenance, and setup logic |
-| [docs/logic/02-assessment-taxonomy.md](docs/logic/02-assessment-taxonomy.md) | Assessment taxonomy vocabulary and compatibility boundaries |
-| [docs/logic/03-rubric-framework.md](docs/logic/03-rubric-framework.md) | Rubric entities, lifecycle, deterministic scoring, bindings, and audit expectations |
+| [docs/design-system.md](docs/design-system.md) | Product principles and architecture posture |
+| [docs/use-cases-and-case-studies.md](docs/use-cases-and-case-studies.md) | User stories, case studies, and workflow sketches |
+| [docs/logic/01-setupdb.md](docs/logic/01-setupdb.md) | Persistence, provenance, artifacts, IDs, and audit linkage |
+| [docs/logic/02-assessment-taxonomy.md](docs/logic/02-assessment-taxonomy.md) | Subject-agnostic classification and compatibility boundaries |
+| [docs/logic/03-rubric-framework.md](docs/logic/03-rubric-framework.md) | Rubric entities, publishing, bindings, and deterministic scoring |
+| [docs/logic/04-answer-lifecycle.md](docs/logic/04-answer-lifecycle.md) | Submitted answer package immutability, revisions, regrades, and superseding |
+| [docs/logic/05-grading-orchestration.md](docs/logic/05-grading-orchestration.md) | Grading runs, deterministic-first execution, AI validation, confidence routing, and review tasks |
 
-Basic local setup:
+## Quick Start
+
+Create the environment:
 
 ```sh
 git clone <repository-url>
 cd RubriCore-STE
-
 uv sync --dev
 cp .env.example .env
 ```
 
-Apply database migrations once PostgreSQL is configured:
+Apply migrations after PostgreSQL is configured:
 
 ```sh
 uv run alembic upgrade head
 ```
 
-Seed local development records:
+Seed local synthetic development data:
 
 ```sh
 uv run python scripts/seed_dev.py
 ```
 
-Quality checks:
+Run tests and linting:
+
+```sh
+.venv/bin/pytest
+.venv/bin/ruff check .
+```
+
+Optional development checks:
 
 ```sh
 uv run ruff format .
-uv run ruff check .
 uv run pyright
-uv run pytest
 uv run pre-commit run --all-files
 ```
 
@@ -159,11 +142,39 @@ Install Git hooks once per clone:
 uv run pre-commit install
 ```
 
-Package the public backend, tests, and docs for low-token AI review with Repomix:
+Package the public backend, tests, and docs for low-token AI review:
 
 ```sh
 npx repomix --config repomix.config.json
 ```
+
+## Core Concepts
+
+| Concept | Purpose |
+| --- | --- |
+| `Assessment` and `AssessmentItem` | Durable authored task context |
+| `Submission` | Learner answer package; immutable after submission |
+| `SubmissionEvidence` | Typed answer evidence, raw text, value payload, or file-backed artifact link |
+| `RubricVersion` | Immutable published rubric snapshot used for grading |
+| `AnswerKeyVersion` | Immutable published answer-key snapshot when deterministic key checks apply |
+| `GradingRun` | One execution attempt against a submission and fixed grading context |
+| `GradingResult` | Proposed, finalized, reviewed, overridden, or superseded outcome |
+| `CriterionResult` | Criterion-level score, explanation, source, and confidence |
+| `AIInteraction` | Provider/model/prompt/schema trace for AI-assisted evaluation |
+| `ReviewTask` | Teacher-facing queue item for low-confidence, ambiguous, disputed, or policy-sensitive results |
+| `AuditEvent` | Append-only history of important lifecycle and grading transitions |
+
+## Implementation Posture
+
+RubriCore-STE favors plain, auditable service logic over hidden workflow magic.
+
+- deterministic checks run before AI
+- AI output must be structured and validated
+- published rubric and answer-key versions are immutable
+- submitted evidence is not edited in place
+- low-confidence or policy-exception cases route to teacher review
+- regrades create new runs rather than rewriting old results
+- final displayed outcomes should come from non-superseded finalized, reviewed, or overridden results
 
 ## Knowledge-Learning Loop
 
@@ -188,10 +199,10 @@ flowchart TD
 
 | Horizon | Focus |
 | --- | --- |
-| Phase 1 | Core database foundation, deterministic grading, review tasks, overrides, audit trail |
-| Phase 2 | Knowledge-library MVP, Markdown conversion, teacher-approved rubric suggestions |
-| Phase 3 | Evaluation datasets, calibration, reliability metrics, model and prompt regression testing |
-| Phase 4 | Provider routing, fallback policy, scale-out and batch grading |
+| Phase 1 | Core database foundation, deterministic grading, grading orchestration, review tasks, overrides, and audit trail |
+| Phase 2 | Knowledge-library MVP, Markdown conversion, and teacher-approved rubric suggestions |
+| Phase 3 | Evaluation datasets, calibration, reliability metrics, and model/prompt regression testing |
+| Phase 4 | Provider routing, fallback policy, scale-out, and batch grading |
 | Phase 5 | Self-hosted AI evaluation and deployment options |
 
 ## Data Safety
@@ -201,8 +212,6 @@ Only synthetic sample data belongs in public files.
 Do not commit real student work, private prompts, private rubrics, private knowledge-library sources, unpublished evaluation datasets, production credentials, or sensitive school and learner information.
 
 ## Contributing Principles
-
-Contributions should preserve the project’s core posture:
 
 - keep the platform subject-agnostic
 - keep published grading context immutable
