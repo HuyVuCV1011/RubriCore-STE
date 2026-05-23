@@ -1,0 +1,11 @@
+Python Score Summary Conversion Source
+
+This plain-text fixture is synthetic content for testing conversion into Markdown or normalized text.
+
+Expected grading reminders:
+
+- average_score should return 0 for an empty list.
+- count_passing should include scores equal to the threshold.
+- score_report should return average, passing, and total.
+
+This file should be treated as teacher-authored guidance, not submitted learner evidence.

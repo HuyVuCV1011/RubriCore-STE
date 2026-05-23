@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -6,12 +9,18 @@ from app.db.models import (
     AssessmentType,
     EvidenceType,
     FilePurpose,
+    KnowledgeSource,
     Organization,
     OutputType,
     Rubric,
     RubricType,
     SubjectPack,
     User,
+)
+from app.db.services.knowledge_library import (
+    convert_knowledge_source_to_markdown,
+    create_knowledge_chunks,
+    register_knowledge_source,
 )
 from app.db.services.rubrics import create_rubric, publish_rubric_version
 from app.db.session import SessionLocal
@@ -20,6 +29,7 @@ from app.taxonomy import AssessmentTypeKey, EvidenceTypeKey, OutputTypeKey, Rubr
 
 LOCAL_ORG_SLUG = "local-development"
 LOCAL_ADMIN_EMAIL = "admin@example.local"
+PYTHON_SCORE_SUMMARY_FIXTURE = Path(__file__).resolve().parents[2] / "tests/fixtures/public/python_score_summary"
 
 
 def _get_or_create_organization(db: Session) -> Organization:
@@ -322,6 +332,75 @@ def _seed_demo_rubric(db: Session, organization: Organization, admin: User) -> N
     )
 
 
+def _seed_demo_knowledge_sources(db: Session, organization: Organization, admin: User) -> None:
+    manifest_path = PYTHON_SCORE_SUMMARY_FIXTURE / "manifest.json"
+    if not manifest_path.exists():
+        return
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for file_entry in manifest.get("files", []):
+        if file_entry.get("purpose") != "knowledge_source":
+            continue
+
+        fixture_path = PYTHON_SCORE_SUMMARY_FIXTURE / file_entry["path"]
+        if not fixture_path.exists():
+            continue
+
+        title = file_entry.get("description") or fixture_path.stem.replace("_", " ").title()
+        exists = db.scalar(
+            select(KnowledgeSource).where(
+                KnowledgeSource.organization_id == organization.id,
+                KnowledgeSource.title == title,
+                KnowledgeSource.access_scope == "public_safe",
+            )
+        )
+        if exists is not None:
+            continue
+
+        content = fixture_path.read_text(encoding="utf-8")
+        source = register_knowledge_source(
+            db,
+            organization_id=organization.id,
+            owner_user_id=admin.id,
+            title=title,
+            source_filename=fixture_path.name,
+            source_storage_uri=f"fixture://python_score_summary/{file_entry['path']}",
+            access_scope="public_safe",
+            source_type="fixture_import",
+            summary=file_entry.get("description"),
+            metadata_payload={
+                "fixture": "python_score_summary",
+                "fixture_path": file_entry["path"],
+                "knowledge_type": file_entry.get("knowledge_type"),
+            },
+            actor_source="fixture_import",
+            reason="Seed public-safe demo knowledge source.",
+        )
+        convert_knowledge_source_to_markdown(
+            db,
+            knowledge_source=source,
+            source_filename=fixture_path.name,
+            source_content=content,
+            markdown_storage_uri=f"derived://fixture/python_score_summary/{fixture_path.stem}.md",
+            actor_user_id=admin.id,
+            actor_source="fixture_import",
+            reason="Seed public-safe demo Markdown conversion.",
+        )
+        if source.conversion_status == "converted":
+            if fixture_path.suffix.lower() in {".md", ".markdown"}:
+                markdown_content = content
+            else:
+                markdown_content = f"# {title}\n\n{content.strip()}\n"
+            create_knowledge_chunks(
+                db,
+                knowledge_source=source,
+                markdown_content=markdown_content,
+                actor_user_id=admin.id,
+                actor_source="fixture_import",
+                reason="Seed public-safe demo knowledge chunks.",
+            )
+
+
 def seed_development_data() -> None:
     settings = get_settings()
     if settings.is_production:
@@ -337,6 +416,7 @@ def seed_development_data() -> None:
         _seed_file_purposes(db, organization)
         _seed_subject_pack(db, organization)
         _seed_demo_rubric(db, organization, admin)
+        _seed_demo_knowledge_sources(db, organization, admin)
         db.commit()
 
 

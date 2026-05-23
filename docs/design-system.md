@@ -145,6 +145,8 @@ The library should accept Markdown directly and support conversion from other fo
 
 Document ingestion should treat files as source artifacts first. Supported adapters may convert source files into Markdown. Unknown formats should be stored with parser status when allowed and routed to review or manual handling when they cannot be interpreted.
 
+The implemented Phase 2 backend slice currently supports Markdown passthrough, plain-text to Markdown conversion, retrieval-ready chunks, non-vector candidate retrieval, and teacher-approved rubric suggestion drafts. Rich document parsing, embeddings, external AI suggestion generation, production upload sessions, API endpoints, and UI remain future work.
+
 Recommended flow:
 
 `upload/import -> source artifact -> detection -> access classification -> Markdown conversion -> validation -> knowledge source version -> derived chunks or summaries -> rubric suggestion or grading assistance -> teacher approval -> audit trail`

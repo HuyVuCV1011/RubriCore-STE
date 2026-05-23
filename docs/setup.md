@@ -95,7 +95,7 @@ For local development only, seed generic setup records with:
 python scripts/seed_dev.py
 ```
 
-Seed data must stay synthetic and should not include real learner records, private rubrics, private prompts, credentials, or provider secrets.
+Seed data must stay synthetic and should not include real learner records, private rubrics, private prompts, credentials, provider secrets, or private knowledge sources. The current development seed may register public-safe fixture knowledge sources, convert supported Markdown or plain-text sources, and create chunks for local regression coverage.
 
 For the public database model, artifact provenance, entity chain, and taxonomy boundary, see [Setup Database Logic](logic/01-setupdb.md).
 
@@ -131,6 +131,6 @@ Docker is not required as the only way to run the project. Contributors should b
 
 ## Current Status
 
-This repository is in early setup. The backend database foundation, dependency file, Alembic migration tooling, and local development seed command are available.
+This repository is in early setup. The backend database foundation, dependency file, Alembic migration tooling, local development seed command, core grading workflow, review policy, and knowledge-library backend MVP are available.
 
 Public setup documentation should stay concise and safe to publish. Internal planning details should remain outside public docs.

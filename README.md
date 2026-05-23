@@ -53,6 +53,12 @@ RubriCore-STE can now create and preserve versioned grading context, accept immu
 
 This is not yet a production application or user-facing grading UI. Later phases should add API/UI surfaces, production auth and permissions, full answer-key authoring, reporting, deployment, and real provider integrations.
 
+## Phase 2 Status
+
+The first Phase 2 backend slice is implemented for the knowledge-library MVP. RubriCore-STE can now register reusable knowledge sources, convert Markdown and plain text into normalized Markdown artifacts, create retrieval-ready chunks, create citation-backed rubric suggestion drafts, and require teacher approval or rejection before accepted suggestions update a mutable rubric draft.
+
+This is still not a production ingestion system or user-facing authoring UI. Rich document parsing, external AI suggestion generation, vector retrieval, production upload sessions, and API surfaces remain later work.
+
 ## Current Backend Foundation
 
 The current public backend foundation includes:
@@ -66,9 +72,10 @@ The current public backend foundation includes:
 | Evidence | Submission evidence records and artifact provenance model |
 | Grading orchestration | Run creation, deterministic scoring, optional AI interaction records, confidence routing, review tasks, and audit events |
 | Review | Review task, teacher review, teacher override, finalization, and return-for-regrade behavior |
+| Knowledge library | Source registration, local Markdown/plain-text conversion, knowledge chunks, non-vector retrieval candidates, and teacher-approved rubric suggestion drafts |
 | Audit trail | Append-only audit records for major Phase 1 lifecycle, grading, review, and rubric-context actions |
-| Fixtures | Public-safe synthetic Python score-summary assignment fixture |
-| Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, and audit events |
+| Fixtures | Public-safe synthetic Python score-summary assignment fixture with knowledge-source examples |
+| Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, knowledge-library logic, rubric suggestions, and audit events |
 
 ## Repository Map
 
@@ -107,6 +114,7 @@ The current public backend foundation includes:
 | [docs/logic/06-confidence-policy.md](docs/logic/06-confidence-policy.md) | Confidence bands, routing gates, review escalation, and auditable policy payloads |
 | [docs/logic/07-review-policy.md](docs/logic/07-review-policy.md) | Teacher review decisions, overrides, regrade returns, finalization, and audit trail |
 | [docs/logic/08-audit-logging.md](docs/logic/08-audit-logging.md) | Append-only audit events, traceability coverage, and Phase 1 audit boundaries |
+| [docs/logic/09-knowledge-library.md](docs/logic/09-knowledge-library.md) | Knowledge source registration, conversion, chunking, retrieval candidates, rubric suggestions, and teacher decisions |
 
 ## Quick Start
 
@@ -172,6 +180,9 @@ npx repomix --config repomix.config.json
 | `CriterionResult` | Criterion-level score, explanation, source, and confidence |
 | `AIInteraction` | Provider/model/prompt/schema trace for AI-assisted evaluation |
 | `ReviewTask` | Teacher-facing queue item for low-confidence, ambiguous, disputed, or policy-sensitive results |
+| `KnowledgeSource` | Versioned reusable grading knowledge linked to source and converted Markdown artifacts |
+| `KnowledgeChunk` | Deterministic Markdown-derived retrieval and citation unit |
+| `RubricSuggestion` | Citation-backed draft recommendation that requires teacher decision before changing a rubric draft |
 | `AuditEvent` | Append-only history of important lifecycle and grading transitions |
 
 ## Implementation Posture
@@ -216,7 +227,7 @@ The project uses the MIT License. Before a broader public release, consider addi
 | Horizon | Focus |
 | --- | --- |
 | Phase 1 | Complete: core database foundation, deterministic grading, grading orchestration, review tasks, overrides, and audit trail |
-| Phase 2 | Knowledge-library MVP, Markdown conversion, and teacher-approved rubric suggestions |
+| Phase 2 | In progress: knowledge-library backend MVP implemented; pilot API/UI, richer import workflows, and provider integrations remain |
 | Phase 3 | Evaluation datasets, calibration, reliability metrics, and model/prompt regression testing |
 | Phase 4 | Provider routing, fallback policy, scale-out, and batch grading |
 | Phase 5 | Self-hosted AI evaluation and deployment options |

@@ -22,6 +22,30 @@
       "description": "Human-readable scoring guide."
     },
     {
+      "path": "knowledge_sources/teacher_grading_notes.md",
+      "purpose": "knowledge_source",
+      "knowledge_type": "teacher_guidance",
+      "description": "Synthetic teacher guidance for review and feedback behavior."
+    },
+    {
+      "path": "knowledge_sources/common_misconceptions.md",
+      "purpose": "knowledge_source",
+      "knowledge_type": "misconception_notes",
+      "description": "Synthetic notes describing common mistakes for retrieval and chunking tests."
+    },
+    {
+      "path": "knowledge_sources/rubric_suggestion_seed.md",
+      "purpose": "knowledge_source",
+      "knowledge_type": "rubric_suggestion_seed",
+      "description": "Synthetic seed material for teacher-approved rubric suggestion tests."
+    },
+    {
+      "path": "knowledge_sources/conversion_source.txt",
+      "purpose": "knowledge_source",
+      "knowledge_type": "conversion_source",
+      "description": "Plain-text source for Markdown or normalized text conversion tests."
+    },
+    {
       "path": "submission_evidence/student_001_correct.py",
       "purpose": "submission_evidence",
       "expected_profile": "correct",
@@ -57,6 +81,7 @@
     "average_score handles non-empty and empty lists.",
     "count_passing includes scores equal to the threshold.",
     "score_report returns average, passing, and total keys.",
-    "Submitted Python file imports without syntax errors."
+    "Submitted Python file imports without syntax errors.",
+    "Knowledge source suggestions require teacher approval before changing rubric context."
   ]
 }
