@@ -69,3 +69,7 @@ Phase 6B is complete when:
 - tests prove missing headers, malformed UUIDs, empty roles, and unknown roles are rejected
 - the existing subject-pack route still uses auth context, tenant-scoped loading, and permission checks
 - docs clearly state that no real provider or credential verification was added
+
+## Next Phase
+
+The next implementation-planning phase is [Phase 6C production auth provider selection](21-phase6c-production-auth-provider-selection.md). It should choose the first real provider style and document config, claim mapping, organization membership resolution, and failure modes before any token verification code is added.
