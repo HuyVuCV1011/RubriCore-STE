@@ -125,6 +125,14 @@ This is still not production JWT verification, OAuth/OIDC client configuration, 
 
 See [docs/logic/21-phase6c-production-auth-provider-selection.md](docs/logic/21-phase6c-production-auth-provider-selection.md).
 
+## Phase 6D Status
+
+Phase 6D is complete as a current-schema production-auth readiness plan. RubriCore-STE now documents a narrow first verified-auth path that can use the existing organization-scoped `users` table, with `users.organization_id`, `users.role`, and `users.status` acting as the first tenant access record under explicit constraints.
+
+This is still not production JWT verification, OAuth/OIDC client configuration, external identity lookup, membership tables, migrations, secrets, credentials, network calls, dependency changes, or new HTTP routes. The long-term global-user and membership model is deferred until product requirements trigger it.
+
+See [docs/logic/22-phase6d-current-schema-auth-readiness.md](docs/logic/22-phase6d-current-schema-auth-readiness.md).
+
 ## Current Backend Foundation
 
 The current public backend foundation includes:
@@ -147,6 +155,7 @@ The current public backend foundation includes:
 | FastAPI route boundary | Phase 6A FastAPI app, dependency shape, tenant-scoped subject-pack loader, and first DB-backed read-only route |
 | Auth provider adapter | Phase 6B framework-light provider interface and development-only pilot-header implementation |
 | Production auth provider selection | Phase 6C OIDC/JWT bearer-token decision, future config inputs, claim mapping, membership lookup, and failure-mode design |
+| Current-schema auth readiness | Phase 6D constrained org-scoped user auth-resolution path and migration triggers |
 | Audit trail | Append-only audit records for major Phase 1 lifecycle, grading, review, and rubric-context actions |
 | Fixtures | Public-safe synthetic Python score-summary assignment and evaluation fixtures with knowledge-source examples |
 | Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, knowledge-library logic, rubric suggestions, and audit events |
@@ -201,6 +210,7 @@ The current public backend foundation includes:
 | [docs/logic/19-phase6a-fastapi-subject-pack-route.md](docs/logic/19-phase6a-fastapi-subject-pack-route.md) | Phase 6A FastAPI route/dependency shape and first auth-aware DB-backed route |
 | [docs/logic/20-phase6b-auth-provider-adapter.md](docs/logic/20-phase6b-auth-provider-adapter.md) | Phase 6B production-auth adapter boundary without a real auth provider |
 | [docs/logic/21-phase6c-production-auth-provider-selection.md](docs/logic/21-phase6c-production-auth-provider-selection.md) | Phase 6C production auth provider selection without implementation |
+| [docs/logic/22-phase6d-current-schema-auth-readiness.md](docs/logic/22-phase6d-current-schema-auth-readiness.md) | Phase 6D current-schema production auth readiness without implementation |
 
 ## Quick Start
 

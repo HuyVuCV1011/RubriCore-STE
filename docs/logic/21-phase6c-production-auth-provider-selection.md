@@ -126,3 +126,7 @@ Phase 6C is complete when:
 - DB-backed organization membership lookup is the preferred authorization source
 - failure modes are documented
 - docs clearly state that no real auth provider or token verification was added
+
+## Next Phase
+
+The next planning phase is [Phase 6D current-schema auth readiness](22-phase6d-current-schema-auth-readiness.md). It should test whether the current organization-scoped `users` table can support a narrow first production-auth path before adding identity or membership migrations.
