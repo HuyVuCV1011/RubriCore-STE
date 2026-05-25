@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import uuid
 from collections.abc import Generator
 import json
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.db.services.subject_packs import subject_pack_summary
 from app.db.session import get_db
 from app.pilot.api_adapters import public_evaluation_baseline_adapter, validate_fixture_manifest_adapter
-from app.pilot.authz import PilotAuthContext, PilotAuthorizationError, PilotRole
+from app.pilot.auth_provider import AuthProvider, PilotAuthProviderError, PilotHeaderAuthProvider
+from app.pilot.authz import PilotAuthContext, PilotAuthorizationError
 from app.pilot.contracts import (
     ApiErrorResponse,
     EvaluationBaselineRequest,
@@ -75,27 +74,18 @@ def create_app() -> FastAPI:
     return app
 
 
-def get_pilot_auth_context(
-    x_pilot_actor_user_id: Annotated[str | None, Header()] = None,
-    x_pilot_organization_id: Annotated[str | None, Header()] = None,
-    x_pilot_roles: Annotated[str | None, Header()] = None,
-    x_pilot_request_id: Annotated[str | None, Header()] = None,
-) -> PilotAuthContext:
-    if not x_pilot_actor_user_id or not x_pilot_organization_id or not x_pilot_roles:
-        raise _api_http_exception(401, code="missing_auth_context", message="Pilot auth context headers are required.")
+def get_pilot_auth_provider() -> AuthProvider:
+    return PilotHeaderAuthProvider()
 
+
+def get_pilot_auth_context(
+    request: Request,
+    auth_provider: Annotated[AuthProvider, Depends(get_pilot_auth_provider)],
+) -> PilotAuthContext:
     try:
-        roles = frozenset(PilotRole(role.strip()) for role in x_pilot_roles.split(",") if role.strip())
-        if not roles:
-            raise ValueError("At least one role is required.")
-        return PilotAuthContext(
-            actor_user_id=uuid.UUID(x_pilot_actor_user_id),
-            organization_id=uuid.UUID(x_pilot_organization_id),
-            roles=roles,
-            request_id=x_pilot_request_id,
-        )
-    except (ValueError, ValidationError) as exc:
-        raise _api_http_exception(401, code="invalid_auth_context", message=str(exc)) from exc
+        return auth_provider.verify_request(request.headers)
+    except PilotAuthProviderError as exc:
+        raise _api_http_exception(401, code=exc.code, message=exc.message) from exc
 
 
 def get_fastapi_db() -> Generator[Session, None, None]:

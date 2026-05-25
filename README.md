@@ -109,6 +109,14 @@ The auth dependency currently uses explicit pilot headers for development and te
 
 See [docs/logic/19-phase6a-fastapi-subject-pack-route.md](docs/logic/19-phase6a-fastapi-subject-pack-route.md).
 
+## Phase 6B Status
+
+Phase 6B adds a production-auth adapter boundary without adding a real provider. RubriCore-STE now has a narrow `AuthProvider.verify_request(...) -> PilotAuthContext` interface and a development-only `PilotHeaderAuthProvider` that preserves the existing explicit pilot-header behavior.
+
+This is still not production OAuth/OIDC/JWT validation, sessions, API keys, user lookup, membership lookup, secrets, credentials, or network verification. The FastAPI subject-pack route behavior remains the same; only the auth parsing responsibility moved out of the route module.
+
+See [docs/logic/20-phase6b-auth-provider-adapter.md](docs/logic/20-phase6b-auth-provider-adapter.md).
+
 ## Current Backend Foundation
 
 The current public backend foundation includes:
@@ -129,6 +137,7 @@ The current public backend foundation includes:
 | Auth and tenancy guardrail | Phase 5B pilot auth context, role/permission map, tenant checks, and DB-backed route readiness policy before HTTP exposure |
 | Production auth plan | Phase 5C provider-style decision path, verified auth-context flow, and tenant-scoped DB loading rules before real HTTP expansion |
 | FastAPI route boundary | Phase 6A FastAPI app, dependency shape, tenant-scoped subject-pack loader, and first DB-backed read-only route |
+| Auth provider adapter | Phase 6B framework-light provider interface and development-only pilot-header implementation |
 | Audit trail | Append-only audit records for major Phase 1 lifecycle, grading, review, and rubric-context actions |
 | Fixtures | Public-safe synthetic Python score-summary assignment and evaluation fixtures with knowledge-source examples |
 | Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, knowledge-library logic, rubric suggestions, and audit events |
@@ -181,6 +190,7 @@ The current public backend foundation includes:
 | [docs/logic/17-phase5b-auth-tenancy-design.md](docs/logic/17-phase5b-auth-tenancy-design.md) | Phase 5B auth and tenancy design guardrail before DB-backed HTTP routes |
 | [docs/logic/18-phase5c-production-auth-implementation-plan.md](docs/logic/18-phase5c-production-auth-implementation-plan.md) | Phase 5C production auth context and tenant-scoped DB loading implementation plan |
 | [docs/logic/19-phase6a-fastapi-subject-pack-route.md](docs/logic/19-phase6a-fastapi-subject-pack-route.md) | Phase 6A FastAPI route/dependency shape and first auth-aware DB-backed route |
+| [docs/logic/20-phase6b-auth-provider-adapter.md](docs/logic/20-phase6b-auth-provider-adapter.md) | Phase 6B production-auth adapter boundary without a real auth provider |
 
 ## Quick Start
 

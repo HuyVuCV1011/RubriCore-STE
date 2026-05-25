@@ -96,6 +96,27 @@ def test_fastapi_subject_pack_route_uses_auth_dependency_and_tenant_scoped_loade
     }
 
 
+def test_fastapi_subject_pack_route_accepts_valid_pilot_headers() -> None:
+    actor_user_id = uuid.uuid4()
+    organization_id = uuid.uuid4()
+    app = create_app()
+    app.dependency_overrides[get_fastapi_db] = lambda: ScalarSession(subject_pack(organization_id=organization_id))
+    client = TestClient(app)
+
+    response = client.get(
+        "/pilot/subject-packs/python-pilot",
+        headers={
+            "X-Pilot-Actor-User-Id": str(actor_user_id),
+            "X-Pilot-Organization-Id": str(organization_id),
+            "X-Pilot-Roles": "read_only",
+            "X-Pilot-Request-Id": "phase6b-test",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["organization_id"] == str(organization_id)
+
+
 def test_fastapi_subject_pack_route_returns_not_found_without_cross_tenant_lookup() -> None:
     organization_id = uuid.uuid4()
     app = create_app()

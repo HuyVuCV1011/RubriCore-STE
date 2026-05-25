@@ -26,14 +26,15 @@ DB-backed FastAPI routes use dependencies for:
 - auth context: `get_pilot_auth_context`
 - database session: `get_fastapi_db`
 
-The current auth dependency reads explicit pilot headers:
+As of Phase 6B, `get_pilot_auth_context` calls the auth-provider boundary in `app.pilot.auth_provider`.
+The current concrete provider is `PilotHeaderAuthProvider`, which reads explicit pilot headers:
 
 - `X-Pilot-Actor-User-Id`
 - `X-Pilot-Organization-Id`
 - `X-Pilot-Roles`
 - `X-Pilot-Request-Id`
 
-These headers are a development boundary for wiring and tests. They are not production authentication. A future auth provider should replace `get_pilot_auth_context` with token/session verification while preserving the route dependency shape.
+These headers are a development boundary for wiring and tests. They are not production authentication. A future auth provider should replace `PilotHeaderAuthProvider` with token/session/API-key verification while preserving the route dependency shape.
 
 ## Subject-Pack Loading
 
