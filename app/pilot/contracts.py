@@ -17,6 +17,21 @@ class PilotContract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ApiErrorResponse(PilotContract):
+    code: str
+    message: str
+    details: JsonObject | list[JsonObject] | None = None
+
+
+class ApiRouteSummaryResponse(PilotContract):
+    method: str
+    path: str
+    request_contract: str | None = None
+    response_contract: str | None = None
+    auth_required: bool
+    data_boundary: str
+
+
 class SubjectPackCreateRequest(PilotContract):
     organization_id: uuid.UUID | None = None
     key: NonEmptyString
@@ -145,6 +160,19 @@ class FixtureManifestRequest(PilotContract):
         return validate_fixture_manifest(self.model_dump())
 
 
+class FixtureManifestValidationResponse(PilotContract):
+    validation_errors: list[str]
+
+
+class EvaluationBaselineRequest(PilotContract):
+    manifest: JsonObject
+
+
+class EvaluationBaselineResponse(PilotContract):
+    validation_errors: list[str]
+    report: JsonObject | None = None
+
+
 class GradingResultExportResponse(PilotContract):
     grading_result_id: str | None
     grading_run_id: str
@@ -173,4 +201,3 @@ class ReviewedExamplePayloadResponse(PilotContract):
     teacher_decision: str | None
     teacher_review_id: str | None
     metadata: JsonObject
-

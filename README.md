@@ -69,6 +69,46 @@ Public API/UI productization, production provider work, rich imports, vector ret
 
 See [docs/logic/14-phase3-evaluation-foundation.md](docs/logic/14-phase3-evaluation-foundation.md).
 
+## Phase 4 Status
+
+Phase 4 has begun as backend API productization planning, a small framework-free adapter foundation, and a minimal stdlib HTTP pilot boundary. RubriCore-STE now has route-shaped adapter functions for existing public-safe workflows, with the first two POST routes wired for fixture manifest validation and public evaluation baseline reporting.
+
+This is not yet a production HTTP API or UI. Teacher-facing UI, provider integrations, prompt execution, rich import, vector retrieval, production authentication and authorization, deployment packaging, web-framework adoption, and private fixture loading remain deferred. The Phase 4 slice preserves the boundary between public GitHub-safe synthetic fixtures under `tests/fixtures/public/` and private/local datasets that must stay in ignored paths such as `tests/fixtures/private/evaluation/` or `private-docs/evaluation/`.
+
+See [docs/logic/15-phase4-api-productization.md](docs/logic/15-phase4-api-productization.md).
+
+## Phase 5A Status
+
+Phase 5A is complete as a production API readiness decision slice. RubriCore-STE keeps the current dependency-free stdlib pilot HTTP boundary for now, standardizes transport error responses, exposes route metadata with contract/auth/data-boundary posture, and documents when a production framework such as FastAPI should be introduced.
+
+FastAPI, production auth, tenant-aware DB object loading, OpenAPI product contracts, deployed API packaging, UI, provider integrations, rich import, vector retrieval, private fixture loading, and schema changes remain deferred.
+
+See [docs/logic/16-phase5a-production-api-readiness.md](docs/logic/16-phase5a-production-api-readiness.md).
+
+## Phase 5B Status
+
+Phase 5B is complete as an auth and tenancy design guardrail. RubriCore-STE now defines a dependency-free pilot auth context, role/permission map, tenant-scoped resource checks, and DB-backed route readiness guard before any tenant-owned workflow is exposed over HTTP.
+
+This is not production login or token verification. OAuth/OIDC/SAML, API keys, sessions, middleware, tenant-aware DB-backed HTTP routes, and audit wiring for exported tenant data remain deferred until a real production API framework boundary is chosen.
+
+See [docs/logic/17-phase5b-auth-tenancy-design.md](docs/logic/17-phase5b-auth-tenancy-design.md).
+
+## Phase 5C Status
+
+Phase 5C is complete as a production auth implementation plan. RubriCore-STE now documents how future middleware or dependency injection should create verified auth context, which provider styles fit later, how tenant-scoped DB loaders should work, and why the first DB-backed route should be a read-only subject-pack summary after real auth exists.
+
+This is still not a production auth implementation. No OAuth/OIDC/JWT validation, sessions, API keys, middleware, DB-backed HTTP routes, framework dependency, schema changes, secrets, or provider integrations were added.
+
+See [docs/logic/18-phase5c-production-auth-implementation-plan.md](docs/logic/18-phase5c-production-auth-implementation-plan.md).
+
+## Phase 6A Status
+
+Phase 6A adds the first FastAPI route/dependency shape. RubriCore-STE now has a FastAPI app with the existing public-safe pilot routes plus `GET /pilot/subject-packs/{key}` as the first auth-aware, tenant-scoped, DB-backed read-only route.
+
+The auth dependency currently uses explicit pilot headers for development and tests. This is not production OAuth/OIDC/JWT validation, sessions, API keys, user lookup, or membership lookup. Review queues, grading exports, calibration exports, answer-key mutation, rubric draft mutation, UI, provider calls, rich import, vector retrieval, and schema changes remain deferred.
+
+See [docs/logic/19-phase6a-fastapi-subject-pack-route.md](docs/logic/19-phase6a-fastapi-subject-pack-route.md).
+
 ## Current Backend Foundation
 
 The current public backend foundation includes:
@@ -84,6 +124,11 @@ The current public backend foundation includes:
 | Review | Review task, teacher review, teacher override, finalization, and return-for-regrade behavior |
 | Knowledge library | Source registration, local Markdown/plain-text conversion, knowledge chunks, non-vector retrieval candidates, and teacher-approved rubric suggestion drafts |
 | Evaluation foundation | Public-safe evaluation fixture boundary, synthetic evaluation manifest, deterministic comparison metrics and reports, reviewed-result calibration export, and local public fixture runner |
+| API productization foundation | Framework-free Phase 4 route plan, thin adapters, and stdlib pilot HTTP boundary over existing public-safe contracts, workflows, and service helpers |
+| API readiness foundation | Phase 5A framework decision, stable pilot error envelope, and route metadata for contract, auth, and data-boundary posture |
+| Auth and tenancy guardrail | Phase 5B pilot auth context, role/permission map, tenant checks, and DB-backed route readiness policy before HTTP exposure |
+| Production auth plan | Phase 5C provider-style decision path, verified auth-context flow, and tenant-scoped DB loading rules before real HTTP expansion |
+| FastAPI route boundary | Phase 6A FastAPI app, dependency shape, tenant-scoped subject-pack loader, and first DB-backed read-only route |
 | Audit trail | Append-only audit records for major Phase 1 lifecycle, grading, review, and rubric-context actions |
 | Fixtures | Public-safe synthetic Python score-summary assignment and evaluation fixtures with knowledge-source examples |
 | Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, knowledge-library logic, rubric suggestions, and audit events |
@@ -131,6 +176,11 @@ The current public backend foundation includes:
 | [docs/logic/12-phase2-backend-productization.md](docs/logic/12-phase2-backend-productization.md) | Backend productization boundary for reusable Phase 2 pilot workflow entry points |
 | [docs/logic/13-phase2-readiness.md](docs/logic/13-phase2-readiness.md) | Phase 2 backend MVP readiness marker and Phase 3 starting checklist |
 | [docs/logic/14-phase3-evaluation-foundation.md](docs/logic/14-phase3-evaluation-foundation.md) | Phase 3 public-safe evaluation dataset boundary and backend metric helpers |
+| [docs/logic/15-phase4-api-productization.md](docs/logic/15-phase4-api-productization.md) | Phase 4 backend API productization plan and thin adapter foundation |
+| [docs/logic/16-phase5a-production-api-readiness.md](docs/logic/16-phase5a-production-api-readiness.md) | Phase 5A production API framework decision and structural readiness boundary |
+| [docs/logic/17-phase5b-auth-tenancy-design.md](docs/logic/17-phase5b-auth-tenancy-design.md) | Phase 5B auth and tenancy design guardrail before DB-backed HTTP routes |
+| [docs/logic/18-phase5c-production-auth-implementation-plan.md](docs/logic/18-phase5c-production-auth-implementation-plan.md) | Phase 5C production auth context and tenant-scoped DB loading implementation plan |
+| [docs/logic/19-phase6a-fastapi-subject-pack-route.md](docs/logic/19-phase6a-fastapi-subject-pack-route.md) | Phase 6A FastAPI route/dependency shape and first auth-aware DB-backed route |
 
 ## Quick Start
 
@@ -166,6 +216,24 @@ Run the public-safe Phase 3 evaluation fixture baseline:
 
 ```sh
 .venv/bin/python scripts/run_public_evaluation_fixture.py --baseline
+```
+
+Run the Phase 4 API-adapter smoke tests:
+
+```sh
+.venv/bin/pytest tests/test_phase4_api_adapters.py tests/test_phase4_http_api.py tests/test_phase4_http_smoke_script.py tests/test_phase5a_api_readiness.py tests/test_phase5b_auth_tenancy_design.py tests/test_phase5c_auth_plan_docs.py tests/test_phase6a_fastapi_subject_pack.py
+```
+
+Run the local Phase 4 pilot HTTP smoke script:
+
+```sh
+.venv/bin/python scripts/smoke_phase4_http_api.py
+```
+
+Optionally run the local pilot HTTP server:
+
+```sh
+.venv/bin/python -m app.pilot.http_api --host 127.0.0.1 --port 8080
 ```
 
 Optional development checks:
