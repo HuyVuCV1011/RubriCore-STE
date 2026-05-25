@@ -55,9 +55,9 @@ This is not yet a production application or user-facing grading UI. Later phases
 
 ## Phase 2 Status
 
-The first Phase 2 backend slice is implemented for the knowledge-library MVP. RubriCore-STE can now register reusable knowledge sources, convert Markdown and plain text into normalized Markdown artifacts, create retrieval-ready chunks, create citation-backed rubric suggestion drafts, and require teacher approval or rejection before accepted suggestions update a mutable rubric draft.
+The Phase 2 knowledge-library backend MVP and pilot service contracts are implemented. RubriCore-STE can now register reusable knowledge sources, convert Markdown and plain text into normalized Markdown artifacts, create retrieval-ready chunks, create citation-backed rubric suggestion drafts, require teacher approval or rejection before accepted suggestions update a mutable rubric draft, and validate typed pilot payloads for later API/UI adapters.
 
-This is still not a production ingestion system or user-facing authoring UI. Rich document parsing, external AI suggestion generation, vector retrieval, production upload sessions, and API surfaces remain later work.
+This is still not a production ingestion system or user-facing authoring UI. Public API/UI productization, rich document parsing, external AI suggestion generation, vector retrieval, production upload sessions, and provider integrations remain later work.
 
 ## Current Backend Foundation
 
@@ -116,6 +116,7 @@ The current public backend foundation includes:
 | [docs/logic/08-audit-logging.md](docs/logic/08-audit-logging.md) | Append-only audit events, traceability coverage, and Phase 1 audit boundaries |
 | [docs/logic/09-knowledge-library.md](docs/logic/09-knowledge-library.md) | Knowledge source registration, conversion, chunking, retrieval candidates, rubric suggestions, and teacher decisions |
 | [docs/logic/10-phase2-pilot-contracts.md](docs/logic/10-phase2-pilot-contracts.md) | Pilot request/response contracts for Phase 2 backend workflows before public API/UI productization |
+| [docs/logic/11-phase2-pilot-api-plan.md](docs/logic/11-phase2-pilot-api-plan.md) | Future pilot API route plan that wraps the Phase 2 contracts without moving business logic into routes |
 
 ## Quick Start
 
@@ -228,7 +229,7 @@ The project uses the MIT License. Before a broader public release, consider addi
 | Horizon | Focus |
 | --- | --- |
 | Phase 1 | Complete: core database foundation, deterministic grading, grading orchestration, review tasks, overrides, and audit trail |
-| Phase 2 | In progress: knowledge-library backend MVP implemented; pilot API/UI, richer import workflows, and provider integrations remain |
+| Phase 2 | In progress: knowledge-library backend MVP and pilot service contracts implemented; public API/UI, richer import workflows, and provider integrations remain |
 | Phase 3 | Evaluation datasets, calibration, reliability metrics, and model/prompt regression testing |
 | Phase 4 | Provider routing, fallback policy, scale-out, and batch grading |
 | Phase 5 | Self-hosted AI evaluation and deployment options |

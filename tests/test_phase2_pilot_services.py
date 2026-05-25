@@ -43,6 +43,14 @@ from app.db.services.subject_packs import (
     subject_pack_summary,
     validate_subject_pack_config,
 )
+from app.pilot.contracts import (
+    AnswerKeyVersionResponse,
+    GradingResultExportResponse,
+    ReviewedExamplePayloadResponse,
+    ReviewTaskSummaryResponse,
+    RubricDraftUpdateRequest,
+    SubjectPackSummaryResponse,
+)
 
 
 class RecordingSession:
@@ -358,6 +366,125 @@ def test_reviewed_example_payload_requires_finalized_result() -> None:
     result.status = "needs_review"
     with pytest.raises(ValueError):
         reviewed_example_payload(result=result, grading_run=run)
+
+
+def test_phase_2_pilot_smoke_workflow_links_service_and_contract_payloads() -> None:
+    organization_id = uuid.uuid4()
+    assessment_item_id = uuid.uuid4()
+    session = RecordingSession()
+
+    subject_pack = create_subject_pack(
+        session,  # type: ignore[arg-type]
+        organization_id=organization_id,
+        key="python-pilot-smoke",
+        name="Python Pilot Smoke",
+        config=subject_pack_config(),
+    )
+    subject_pack_response = SubjectPackSummaryResponse.model_validate(subject_pack_summary(subject_pack))
+
+    answer_key = create_answer_key(
+        session,  # type: ignore[arg-type]
+        organization_id=organization_id,
+        assessment_item_id=assessment_item_id,
+        title="Pilot Answer Key",
+        draft_key={"accepted": ["42"], "metadata": {"source": "smoke_test"}},
+    )
+    answer_key_version = publish_answer_key_version(
+        session,  # type: ignore[arg-type]
+        answer_key=answer_key,
+        reason="Ready for smoke workflow.",
+    )
+    answer_key_response = AnswerKeyVersionResponse.model_validate(
+        {
+            "answer_key_id": str(answer_key.id),
+            "answer_key_version_id": str(answer_key_version.id),
+            "version_number": answer_key_version.version_number,
+            "status": answer_key_version.status,
+        }
+    )
+
+    rubric_update = RubricDraftUpdateRequest(
+        draft_schema=rubric_schema(),
+        title="Pilot Smoke Rubric",
+        metadata_patch={"subject_pack_key": subject_pack.key},
+        reason="Smoke workflow update.",
+    )
+    rubric = Rubric(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        rubric_type_id=uuid.uuid4(),
+        title="Original Pilot Rubric",
+        status="published",
+        draft_schema=rubric_schema(),
+        latest_version_number=1,
+        metadata_payload={},
+    )
+    update_rubric_draft(
+        session,  # type: ignore[arg-type]
+        rubric=rubric,
+        draft_schema=rubric_update.draft_schema,
+        actor_source=rubric_update.actor_source,
+        title=rubric_update.title,
+        metadata_patch=rubric_update.metadata_patch,
+        reason=rubric_update.reason,
+    )
+
+    submission_id = uuid.uuid4()
+    review_task = ReviewTask(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        submission_id=submission_id,
+        status="open",
+        priority="urgent",
+        confidence_band="low",
+        escalation_reason="low_confidence",
+        policy_payload={"source": "smoke_test"},
+    )
+    review_response = ReviewTaskSummaryResponse.model_validate(review_task_summary(review_task))
+
+    grading_run = GradingRun(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        submission_id=submission_id,
+        status="completed",
+        context_payload={"subject_pack_key": subject_pack.key},
+    )
+    grading_result = GradingResult(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        grading_run_id=grading_run.id,
+        rubric_version_id=uuid.uuid4(),
+        answer_key_version_id=answer_key_version.id,
+        result_type="reviewed",
+        status="finalized",
+        total_score=Decimal("4"),
+        max_score=Decimal("5"),
+        confidence=Decimal("0.8500"),
+        feedback="Ready for calibration.",
+        explanation_payload={"source": "smoke_test"},
+    )
+    teacher_review = TeacherReview(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        review_task_id=review_task.id,
+        reviewer_id=uuid.uuid4(),
+        grading_result_id=grading_result.id,
+        decision="approve",
+        metadata_payload={},
+    )
+    export_response = GradingResultExportResponse.model_validate(export_grading_result(grading_result))
+    calibration_response = ReviewedExamplePayloadResponse.model_validate(
+        reviewed_example_payload(result=grading_result, grading_run=grading_run, teacher_review=teacher_review)
+    )
+
+    assert subject_pack_response.key == "python-pilot-smoke"
+    assert answer_key_response.version_number == 1
+    assert rubric.status == "draft"
+    assert rubric.metadata_payload["subject_pack_key"] == subject_pack.key
+    assert review_response.priority == "urgent"
+    assert export_response.answer_key_version_id == str(answer_key_version.id)
+    assert calibration_response.submission_id == str(submission_id)
+    assert calibration_response.teacher_decision == "approve"
 
 
 def test_db_subject_pack_create_rejects_duplicate_global_key(db_session: Session) -> None:
