@@ -46,6 +46,11 @@
       "description": "Plain-text source for Markdown or normalized text conversion tests."
     },
     {
+      "path": "evaluation_cases/manifest.json",
+      "purpose": "evaluation_manifest",
+      "description": "Synthetic public-safe evaluation cases with fake expected outcomes."
+    },
+    {
       "path": "submission_evidence/student_001_correct.py",
       "purpose": "submission_evidence",
       "expected_profile": "correct",

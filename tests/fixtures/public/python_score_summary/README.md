@@ -13,6 +13,7 @@ The assignment asks learners to implement simple Python functions for working wi
 - `knowledge_sources/common_misconceptions.md`: synthetic misconception notes for retrieval and chunking tests.
 - `knowledge_sources/rubric_suggestion_seed.md`: synthetic seed material for teacher-approved rubric suggestions.
 - `knowledge_sources/conversion_source.txt`: simple plain-text source for conversion tests.
+- `evaluation_cases/manifest.json`: synthetic public-safe evaluation cases with fake expected outcomes.
 - `submission_evidence/student_001_correct.py`: correct direct solution.
 - `submission_evidence/student_002_partial.py`: partially correct, misses one requirement.
 - `submission_evidence/student_003_incorrect.py`: incorrect logic and missing edge-case handling.

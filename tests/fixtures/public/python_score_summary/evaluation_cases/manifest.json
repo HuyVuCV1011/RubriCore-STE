@@ -1,0 +1,100 @@
+{
+  "fixture_set": "python_score_summary_evaluation",
+  "title": "Python Score Summary Evaluation Cases",
+  "privacy": "public_safe",
+  "schema_version": "1.0",
+  "dataset_purpose": "Synthetic backend regression cases for grading score, criterion, and final/review routing comparisons.",
+  "source_references": [
+    {
+      "path": "assessment_materials/problem_statement.md",
+      "purpose": "assessment_material",
+      "description": "Synthetic public-safe assignment prompt."
+    },
+    {
+      "path": "rubrics/scoring_guide.md",
+      "purpose": "rubric_source",
+      "description": "Synthetic public-safe rubric guidance."
+    },
+    {
+      "path": "submission_evidence/student_001_correct.py",
+      "purpose": "submission_evidence",
+      "description": "Fake learner response used for an expected final outcome."
+    },
+    {
+      "path": "submission_evidence/student_002_partial.py",
+      "purpose": "submission_evidence",
+      "description": "Fake learner response used for an expected review outcome."
+    }
+  ],
+  "files": [
+    {
+      "path": "evaluation_cases/manifest.json",
+      "purpose": "evaluation_manifest",
+      "description": "Synthetic public-safe evaluation case manifest."
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "eval_public_safe_001",
+      "submission_ref": "submission_evidence/student_001_correct.py",
+      "expected_outcome": {
+        "total_score": "6",
+        "max_score": "6",
+        "routing": "final",
+        "criteria": [
+          {
+            "criterion_key": "functions",
+            "score": "2",
+            "max_score": "2"
+          },
+          {
+            "criterion_key": "edge_cases",
+            "score": "2",
+            "max_score": "2"
+          },
+          {
+            "criterion_key": "report_shape",
+            "score": "2",
+            "max_score": "2"
+          }
+        ]
+      },
+      "metadata": {
+        "privacy": "public_safe",
+        "synthetic": true,
+        "learner_ref": "fake_learner_alpha"
+      }
+    },
+    {
+      "case_id": "eval_public_safe_002",
+      "submission_ref": "submission_evidence/student_002_partial.py",
+      "expected_outcome": {
+        "total_score": "4",
+        "max_score": "6",
+        "routing": "review",
+        "criteria": [
+          {
+            "criterion_key": "functions",
+            "score": "2",
+            "max_score": "2"
+          },
+          {
+            "criterion_key": "edge_cases",
+            "score": "0",
+            "max_score": "2"
+          },
+          {
+            "criterion_key": "report_shape",
+            "score": "2",
+            "max_score": "2"
+          }
+        ]
+      },
+      "metadata": {
+        "privacy": "public_safe",
+        "synthetic": true,
+        "learner_ref": "fake_learner_beta"
+      }
+    }
+  ]
+}

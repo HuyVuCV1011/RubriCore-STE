@@ -61,6 +61,14 @@ This is still not a production ingestion system or user-facing authoring UI. Pub
 
 Phase 2 is complete as a backend MVP and ready to hand off into Phase 3 evaluation and calibration foundation work. See [docs/logic/13-phase2-readiness.md](docs/logic/13-phase2-readiness.md).
 
+## Phase 3 Status
+
+Phase 3 has a backend-only evaluation and calibration foundation. RubriCore-STE now defines public-safe evaluation dataset boundaries, includes a synthetic evaluation manifest, provides deterministic helpers and reports for score, criterion, and final/review routing comparisons, can export finalized reviewed/overridden results into the same evaluation comparison shape, and includes a local public-fixture runner.
+
+Public API/UI productization, production provider work, rich imports, vector retrieval, and external AI integrations remain deferred. Public GitHub-safe fixtures must stay synthetic under `tests/fixtures/public/`; private or real-world evaluation datasets belong only in ignored local paths such as `tests/fixtures/private/evaluation/` or `private-docs/evaluation/`.
+
+See [docs/logic/14-phase3-evaluation-foundation.md](docs/logic/14-phase3-evaluation-foundation.md).
+
 ## Current Backend Foundation
 
 The current public backend foundation includes:
@@ -75,8 +83,9 @@ The current public backend foundation includes:
 | Grading orchestration | Run creation, deterministic scoring, optional AI interaction records, confidence routing, review tasks, and audit events |
 | Review | Review task, teacher review, teacher override, finalization, and return-for-regrade behavior |
 | Knowledge library | Source registration, local Markdown/plain-text conversion, knowledge chunks, non-vector retrieval candidates, and teacher-approved rubric suggestion drafts |
+| Evaluation foundation | Public-safe evaluation fixture boundary, synthetic evaluation manifest, deterministic comparison metrics and reports, reviewed-result calibration export, and local public fixture runner |
 | Audit trail | Append-only audit records for major Phase 1 lifecycle, grading, review, and rubric-context actions |
-| Fixtures | Public-safe synthetic Python score-summary assignment fixture with knowledge-source examples |
+| Fixtures | Public-safe synthetic Python score-summary assignment and evaluation fixtures with knowledge-source examples |
 | Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, knowledge-library logic, rubric suggestions, and audit events |
 
 ## Repository Map
@@ -121,6 +130,7 @@ The current public backend foundation includes:
 | [docs/logic/11-phase2-pilot-api-plan.md](docs/logic/11-phase2-pilot-api-plan.md) | Future pilot API route plan that wraps the Phase 2 contracts without moving business logic into routes |
 | [docs/logic/12-phase2-backend-productization.md](docs/logic/12-phase2-backend-productization.md) | Backend productization boundary for reusable Phase 2 pilot workflow entry points |
 | [docs/logic/13-phase2-readiness.md](docs/logic/13-phase2-readiness.md) | Phase 2 backend MVP readiness marker and Phase 3 starting checklist |
+| [docs/logic/14-phase3-evaluation-foundation.md](docs/logic/14-phase3-evaluation-foundation.md) | Phase 3 public-safe evaluation dataset boundary and backend metric helpers |
 
 ## Quick Start
 
@@ -150,6 +160,12 @@ Run tests and linting:
 ```sh
 .venv/bin/pytest
 .venv/bin/ruff check .
+```
+
+Run the public-safe Phase 3 evaluation fixture baseline:
+
+```sh
+.venv/bin/python scripts/run_public_evaluation_fixture.py --baseline
 ```
 
 Optional development checks:

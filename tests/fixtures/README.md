@@ -12,6 +12,7 @@ tests/fixtures/
 <fixture_set>/
 ├── assessment_materials/
 ├── answer_key_sources/
+├── evaluation_cases/
 └── submission_evidence/
 ```
 
@@ -27,6 +28,7 @@ Use public fixtures for:
 - documentation examples
 - public demos
 - CI-safe grading and artifact-provenance checks
+- synthetic evaluation and calibration regression cases
 
 Do not commit:
 
@@ -45,6 +47,7 @@ Private fixtures are local-only materials for testing with sensitive or real-wor
 Rules:
 
 - keep them ignored by Git
+- keep private evaluation datasets under ignored paths such as `tests/fixtures/private/evaluation/`
 - do not document personally identifying details in tracked files
 - prefer a matching public fixture fallback for automated tests
 - never require private fixtures for CI or clean-clone verification

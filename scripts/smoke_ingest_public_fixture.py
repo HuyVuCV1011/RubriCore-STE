@@ -23,6 +23,8 @@ PURPOSE_MAP = {
     "rubric_source": "rubric_source",
     "knowledge_source": "knowledge_source",
     "converted_markdown": "converted_markdown",
+    "evaluation_manifest": "extracted_representation",
+    "evaluation_case": "extracted_representation",
 }
 
 
