@@ -59,6 +59,8 @@ The Phase 2 knowledge-library backend MVP, pilot service contracts, and reusable
 
 This is still not a production ingestion system or user-facing authoring UI. Public API/UI productization, rich document parsing, external AI suggestion generation, vector retrieval, production upload sessions, and provider integrations remain later work.
 
+Phase 2 is complete as a backend MVP and ready to hand off into Phase 3 evaluation and calibration foundation work. See [docs/logic/13-phase2-readiness.md](docs/logic/13-phase2-readiness.md).
+
 ## Current Backend Foundation
 
 The current public backend foundation includes:
@@ -118,6 +120,7 @@ The current public backend foundation includes:
 | [docs/logic/10-phase2-pilot-contracts.md](docs/logic/10-phase2-pilot-contracts.md) | Pilot request/response contracts for Phase 2 backend workflows before public API/UI productization |
 | [docs/logic/11-phase2-pilot-api-plan.md](docs/logic/11-phase2-pilot-api-plan.md) | Future pilot API route plan that wraps the Phase 2 contracts without moving business logic into routes |
 | [docs/logic/12-phase2-backend-productization.md](docs/logic/12-phase2-backend-productization.md) | Backend productization boundary for reusable Phase 2 pilot workflow entry points |
+| [docs/logic/13-phase2-readiness.md](docs/logic/13-phase2-readiness.md) | Phase 2 backend MVP readiness marker and Phase 3 starting checklist |
 
 ## Quick Start
 
@@ -230,7 +233,7 @@ The project uses the MIT License. Before a broader public release, consider addi
 | Horizon | Focus |
 | --- | --- |
 | Phase 1 | Complete: core database foundation, deterministic grading, grading orchestration, review tasks, overrides, and audit trail |
-| Phase 2 | Backend productization in progress: knowledge-library backend MVP, pilot service contracts, and pilot workflow facade implemented; public API/UI, richer import workflows, and provider integrations remain |
+| Phase 2 | Complete as backend MVP: knowledge-library backend, pilot services, contracts, and workflow facade implemented; public API/UI, richer import workflows, and provider integrations deferred |
 | Phase 3 | Evaluation datasets, calibration, reliability metrics, and model/prompt regression testing |
 | Phase 4 | Provider routing, fallback policy, scale-out, and batch grading |
 | Phase 5 | Self-hosted AI evaluation and deployment options |
