@@ -9,6 +9,9 @@ class Settings(BaseSettings):
 
     app_env: str = Field(default="local", alias="APP_ENV")
     database_url: str = Field(alias="DATABASE_URL")
+    ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
+    ollama_model: str = Field(default="llama3.2:1b", alias="OLLAMA_MODEL")
+    ollama_timeout_seconds: float = Field(default=120.0, alias="OLLAMA_TIMEOUT_SECONDS")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

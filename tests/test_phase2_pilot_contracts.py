@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.db.models import GradingResult, ReviewTask, SubjectPack
+from app.db.models import CriterionResult, GradingResult, ReviewTask, SubjectPack
 from app.db.services.pilot_io import export_grading_result
 from app.db.services.review_queue import review_task_summary
 from app.db.services.subject_packs import subject_pack_summary
@@ -127,9 +127,26 @@ def test_grading_result_export_contract_accepts_service_payload() -> None:
         feedback="Good work.",
         explanation_payload={"source": "unit_test"},
     )
+    result.criterion_results = [
+        CriterionResult(
+            id=uuid.uuid4(),
+            organization_id=result.organization_id,
+            grading_result_id=result.id,
+            criterion_key="correctness",
+            source="ai",
+            score=Decimal("2"),
+            max_score=Decimal("2"),
+            confidence=Decimal("0.9100"),
+            explanation="The answer meets the expected behavior.",
+            metadata_payload={"evidence_references": ["evidence-1"]},
+        )
+    ]
 
     response = GradingResultExportResponse.model_validate(export_grading_result(result))
 
     assert response.total_score == Decimal("4")
     assert response.confidence == Decimal("0.9000")
     assert response.explanation_payload == {"source": "unit_test"}
+    assert response.criterion_results[0].criterion_key == "correctness"
+    assert response.criterion_results[0].score == Decimal("2")
+    assert response.criterion_results[0].source == "ai"

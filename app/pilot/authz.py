@@ -17,6 +17,8 @@ class PilotPermission(StrEnum):
     READ_SUBJECT_PACKS = "read_subject_packs"
     READ_GRADING_EXPORTS = "read_grading_exports"
     READ_REVIEW_QUEUE = "read_review_queue"
+    WRITE_REVIEW_ACTIONS = "write_review_actions"
+    RUN_GRADING = "run_grading"
     WRITE_ANSWER_KEYS = "write_answer_keys"
     WRITE_RUBRIC_DRAFTS = "write_rubric_drafts"
     EXPORT_CALIBRATION = "export_calibration"
@@ -30,6 +32,8 @@ ROLE_PERMISSIONS: dict[PilotRole, frozenset[PilotPermission]] = {
             PilotPermission.READ_SUBJECT_PACKS,
             PilotPermission.READ_GRADING_EXPORTS,
             PilotPermission.READ_REVIEW_QUEUE,
+            PilotPermission.WRITE_REVIEW_ACTIONS,
+            PilotPermission.RUN_GRADING,
             PilotPermission.WRITE_ANSWER_KEYS,
             PilotPermission.WRITE_RUBRIC_DRAFTS,
             PilotPermission.EXPORT_CALIBRATION,
@@ -40,6 +44,7 @@ ROLE_PERMISSIONS: dict[PilotRole, frozenset[PilotPermission]] = {
             PilotPermission.READ_SUBJECT_PACKS,
             PilotPermission.READ_GRADING_EXPORTS,
             PilotPermission.READ_REVIEW_QUEUE,
+            PilotPermission.WRITE_REVIEW_ACTIONS,
             PilotPermission.EXPORT_CALIBRATION,
         }
     ),
@@ -55,6 +60,8 @@ ROLE_PERMISSIONS: dict[PilotRole, frozenset[PilotPermission]] = {
 DB_BACKED_ROUTE_PERMISSIONS: dict[str, PilotPermission] = {
     "/pilot/subject-packs/{key}": PilotPermission.READ_SUBJECT_PACKS,
     "/pilot/review-tasks": PilotPermission.READ_REVIEW_QUEUE,
+    "/pilot/review-tasks/{review_task_id}/actions/{action}": PilotPermission.WRITE_REVIEW_ACTIONS,
+    "/pilot/grading-runs": PilotPermission.RUN_GRADING,
     "/pilot/grading-results/{grading_result_id}/export": PilotPermission.READ_GRADING_EXPORTS,
     "/pilot/grading-results/{grading_result_id}/reviewed-example": PilotPermission.EXPORT_CALIBRATION,
     "/pilot/answer-keys": PilotPermission.WRITE_ANSWER_KEYS,

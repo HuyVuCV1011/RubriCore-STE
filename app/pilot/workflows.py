@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
-from app.db.models import AnswerKey, GradingResult, GradingRun, Rubric, TeacherReview
+from app.db.models import (
+    AnswerKey,
+    AnswerKeyVersion,
+    GradingResult,
+    GradingRun,
+    Rubric,
+    RubricVersion,
+    Submission,
+    TeacherReview,
+)
 from app.db.services.answer_keys import create_answer_key, publish_answer_key_version, update_answer_key_draft
 from app.db.services.calibration import reviewed_example_payload
+from app.db.services.grading_orchestration import AIGradingProvider, GradingPolicy, orchestrate_grading_for_submission
 from app.db.services.pilot_io import export_grading_result
 from app.db.services.review_queue import list_review_tasks, review_task_summary
 from app.db.services.rubric_authoring import update_rubric_draft
@@ -16,7 +27,10 @@ from app.pilot.contracts import (
     AnswerKeyPublishRequest,
     AnswerKeyUpdateRequest,
     AnswerKeyVersionResponse,
+    AIInteractionSummaryResponse,
     FixtureManifestRequest,
+    GradingRunRequest,
+    GradingRunResponse,
     GradingResultExportResponse,
     ReviewedExamplePayloadResponse,
     ReviewTaskListRequest,
@@ -58,7 +72,7 @@ def resolve_subject_pack_workflow(
 
 def create_answer_key_workflow(db: Session, request: AnswerKeyCreateRequest) -> AnswerKey:
     return create_answer_key(
-        db,
+        cast(Any, db),
         organization_id=request.organization_id,
         assessment_item_id=request.assessment_item_id,
         title=request.title,
@@ -141,6 +155,63 @@ def validate_fixture_manifest_workflow(request: FixtureManifestRequest) -> list[
     return request.validation_errors()
 
 
+def run_grading_workflow(
+    db: Session,
+    *,
+    submission: Submission,
+    rubric_version: RubricVersion | None,
+    answer_key_version: AnswerKeyVersion | None,
+    ai_provider: AIGradingProvider | None,
+    request: GradingRunRequest,
+    actor_user_id: uuid.UUID,
+) -> GradingRunResponse:
+    policy = GradingPolicy(
+        confidence_threshold=request.confidence_threshold,
+        review_threshold=request.review_threshold,
+        ai_allowed=request.ai_allowed,
+        ai_required=request.ai_required,
+        auto_finalize_allowed=request.auto_finalize_allowed,
+        mandatory_review=request.mandatory_review,
+        grading_policy_version="pilot-api-v1",
+        prompt_version="pilot-ollama-grading-v1",
+        ai_output_schema_version="phase-1-grading-output-v1",
+    )
+    outcome = orchestrate_grading_for_submission(
+        cast(Any, db),
+        submission=submission,
+        rubric_version=rubric_version,
+        answer_key_version=answer_key_version,
+        selected_levels_by_criterion=request.selected_levels_by_criterion,
+        ai_provider=ai_provider if request.ai_allowed else None,
+        answer_key_required=request.answer_key_required,
+        policy=policy,
+        triggered_by_user_id=actor_user_id,
+        trigger_source="pilot_api",
+        reason=request.reason,
+        request_id=request.request_id,
+        context_payload={"api_route": "/pilot/grading-runs"},
+    )
+    return GradingRunResponse(
+        grading_run_id=str(outcome.grading_run.id),
+        grading_run_status=outcome.grading_run.status,
+        grading_result=export_grading_result_workflow(outcome.grading_result) if outcome.grading_result else None,
+        review_task_id=str(outcome.review_task.id) if outcome.review_task is not None else None,
+        ai_interaction=(
+            AIInteractionSummaryResponse.model_validate(
+                {
+                    "id": str(outcome.ai_interaction.id) if outcome.ai_interaction.id is not None else None,
+                    "provider": outcome.ai_interaction.provider,
+                    "model": outcome.ai_interaction.model,
+                    "validation_status": outcome.ai_interaction.validation_status,
+                    "error_message": outcome.ai_interaction.error_message,
+                }
+            )
+            if outcome.ai_interaction is not None
+            else None
+        ),
+    )
+
+
 def export_grading_result_workflow(result: GradingResult) -> GradingResultExportResponse:
     return GradingResultExportResponse.model_validate(export_grading_result(result))
 
@@ -154,4 +225,3 @@ def reviewed_example_payload_workflow(
     return ReviewedExamplePayloadResponse.model_validate(
         reviewed_example_payload(result=result, grading_run=grading_run, teacher_review=teacher_review)
     )
-

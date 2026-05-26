@@ -122,6 +122,20 @@ def export_grading_result(result: GradingResult) -> dict[str, Any]:
         "confidence": _decimal_to_string(result.confidence),
         "feedback": result.feedback,
         "explanation_payload": result.explanation_payload,
+        "criterion_results": [_criterion_result_payload(item) for item in result.criterion_results],
+    }
+
+
+def _criterion_result_payload(result: Any) -> dict[str, Any]:
+    return {
+        "id": str(result.id) if result.id is not None else None,
+        "criterion_key": result.criterion_key,
+        "source": result.source,
+        "score": _decimal_to_string(result.score),
+        "max_score": _decimal_to_string(result.max_score),
+        "confidence": _decimal_to_string(result.confidence),
+        "explanation": result.explanation,
+        "metadata_payload": result.metadata_payload,
     }
 
 
