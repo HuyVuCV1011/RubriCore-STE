@@ -1,22 +1,29 @@
 import json
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import (
+    Assessment,
     AssessmentType,
+    AssessmentItem,
     EvidenceType,
     FilePurpose,
     KnowledgeSource,
+    Learner,
     Organization,
     OutputType,
     Rubric,
     RubricType,
     SubjectPack,
+    Submission,
+    SubmissionEvidence,
     User,
 )
+from app.db.services.answer_lifecycle import add_submission_evidence, create_draft_submission, submit_submission
 from app.db.services.knowledge_library import (
     convert_knowledge_source_to_markdown,
     create_knowledge_chunks,
@@ -29,6 +36,7 @@ from app.taxonomy import AssessmentTypeKey, EvidenceTypeKey, OutputTypeKey, Rubr
 
 LOCAL_ORG_SLUG = "local-development"
 LOCAL_ADMIN_EMAIL = "admin@example.local"
+LOCAL_LEARNER_REF = "learner-demo-001"
 PYTHON_SCORE_SUMMARY_FIXTURE = Path(__file__).resolve().parents[2] / "tests/fixtures/public/python_score_summary"
 
 
@@ -314,7 +322,7 @@ def _seed_demo_rubric(db: Session, organization: Organization, admin: User) -> N
     }
 
     rubric = create_rubric(
-        db,
+        cast(Any, db),
         organization_id=organization.id,
         rubric_type_id=rubric_type.id,
         created_by_user_id=admin.id,
@@ -325,10 +333,150 @@ def _seed_demo_rubric(db: Session, organization: Organization, admin: User) -> N
         metadata_payload={"fixture": "python_score_summary", "subject_agnostic": True},
     )
     publish_rubric_version(
-        db,
+        cast(Any, db),
         rubric=rubric,
         published_by_user_id=admin.id,
         source_metadata={"source": "seed_dev", "fixture": "python_score_summary"},
+    )
+
+
+def _get_or_create_demo_learner(db: Session, organization: Organization) -> Learner:
+    learner = db.scalar(
+        select(Learner).where(
+            Learner.organization_id == organization.id,
+            Learner.external_ref == LOCAL_LEARNER_REF,
+        )
+    )
+    if learner is not None:
+        return learner
+
+    learner = Learner(
+        organization_id=organization.id,
+        external_ref=LOCAL_LEARNER_REF,
+        display_name="Demo Learner",
+        status="active",
+    )
+    db.add(learner)
+    db.flush()
+    return learner
+
+
+def _get_or_create_demo_assessment_item(db: Session, organization: Organization, admin: User) -> AssessmentItem:
+    existing = db.scalar(
+        select(AssessmentItem).where(
+            AssessmentItem.organization_id == organization.id,
+            AssessmentItem.title == "Python Score Summary Demo Item",
+        )
+    )
+    if existing is not None:
+        return existing
+
+    assessment_type = db.scalar(
+        select(AssessmentType).where(
+            AssessmentType.organization_id == organization.id,
+            AssessmentType.key == AssessmentTypeKey.CODE_ASSIGNMENT.value,
+        )
+    )
+    if assessment_type is None:
+        raise RuntimeError("Code assignment assessment type must be seeded before demo assessment.")
+
+    output_type = db.scalar(
+        select(OutputType).where(
+            OutputType.organization_id == organization.id,
+            OutputType.key == OutputTypeKey.EXECUTABLE_BEHAVIOR.value,
+        )
+    )
+    if output_type is None:
+        raise RuntimeError("Executable behavior output type must be seeded before demo assessment.")
+
+    assessment = Assessment(
+        organization_id=organization.id,
+        assessment_type_id=assessment_type.id,
+        created_by_user_id=admin.id,
+        title="Python Score Summary Demo",
+        description="Synthetic local-development assessment for end-to-end grading.",
+        status="active",
+        settings={"fixture": "python_score_summary"},
+    )
+    db.add(assessment)
+    db.flush()
+
+    item = AssessmentItem(
+        organization_id=organization.id,
+        assessment_id=assessment.id,
+        assessment_type_id=assessment_type.id,
+        output_type_id=output_type.id,
+        title="Python Score Summary Demo Item",
+        prompt="Write code that computes a score summary from submitted records.",
+        position=0,
+        status="active",
+        item_config={"fixture": "python_score_summary"},
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
+def _seed_demo_submission(db: Session, organization: Organization, admin: User) -> None:
+    learner = _get_or_create_demo_learner(db, organization)
+    item = _get_or_create_demo_assessment_item(db, organization, admin)
+    exists = db.scalar(
+        select(Submission).where(
+            Submission.organization_id == organization.id,
+            Submission.assessment_item_id == item.id,
+            Submission.learner_id == learner.id,
+            Submission.status == "submitted",
+        )
+    )
+    if exists is not None:
+        return
+
+    evidence_type = db.scalar(
+        select(EvidenceType).where(
+            EvidenceType.organization_id == organization.id,
+            EvidenceType.key == EvidenceTypeKey.CODE.value,
+        )
+    )
+    if evidence_type is None:
+        raise RuntimeError("Code evidence type must be seeded before demo submission.")
+
+    submission = create_draft_submission(
+        cast(Any, db),
+        organization_id=organization.id,
+        learner_id=learner.id,
+        assessment_id=item.assessment_id,
+        assessment_item_id=item.id,
+        actor_user_id=admin.id,
+        actor_source="fixture_import",
+        metadata_payload={"fixture": "python_score_summary", "demo": True},
+        request_id="seed-dev-demo-submission",
+    )
+    add_submission_evidence(
+        cast(Any, db),
+        submission=submission,
+        evidence_type_id=evidence_type.id,
+        raw_text=(
+            "def summarize_scores(scores):\n"
+            "    total = sum(scores)\n"
+            "    count = len(scores)\n"
+            "    average = total / count if count else 0\n"
+            "    return {'total': total, 'count': count, 'average': average}\n"
+        ),
+        value_payload={"language": "python"},
+        actor_user_id=admin.id,
+        actor_source="fixture_import",
+        request_id="seed-dev-demo-submission",
+    )
+    submission.evidence = list(
+        db.scalars(select(SubmissionEvidence).where(SubmissionEvidence.submission_id == submission.id))
+    )
+    submit_submission(
+        cast(Any, db),
+        submission=submission,
+        actor_user_id=admin.id,
+        actor_source="fixture_import",
+        reason="Seed public-safe demo submission.",
+        request_id="seed-dev-demo-submission",
     )
 
 
@@ -416,6 +564,7 @@ def seed_development_data() -> None:
         _seed_file_purposes(db, organization)
         _seed_subject_pack(db, organization)
         _seed_demo_rubric(db, organization, admin)
+        _seed_demo_submission(db, organization, admin)
         _seed_demo_knowledge_sources(db, organization, admin)
         db.commit()
 

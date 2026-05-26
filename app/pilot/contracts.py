@@ -173,6 +173,41 @@ class EvaluationBaselineResponse(PilotContract):
     report: JsonObject | None = None
 
 
+class GradingRunRequest(PilotContract):
+    submission_id: uuid.UUID
+    rubric_version_id: uuid.UUID | None = None
+    answer_key_version_id: uuid.UUID | None = None
+    selected_levels_by_criterion: dict[str, str] = Field(default_factory=dict)
+    ai_allowed: bool = True
+    ai_required: bool = False
+    auto_finalize_allowed: bool = True
+    mandatory_review: bool = False
+    answer_key_required: bool = False
+    confidence_threshold: Decimal = Field(default=Decimal("0.85"), ge=0, le=1)
+    review_threshold: Decimal = Field(default=Decimal("0.70"), ge=0, le=1)
+    reason: str | None = None
+    request_id: str | None = None
+
+
+class ReviewActionRequest(PilotContract):
+    reason: NonEmptyString
+    feedback: str | None = None
+    total_score: Decimal | None = Field(default=None, ge=0)
+    criterion_result_id: uuid.UUID | None = None
+    criterion_key: str | None = None
+    criterion_score: Decimal | None = Field(default=None, ge=0)
+    criterion_max_score: Decimal | None = Field(default=None, ge=0)
+    criterion_explanation: str | None = None
+    request_id: str | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def require_reason(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Teacher review actions require a reason.")
+        return value
+
+
 class GradingResultExportResponse(PilotContract):
     grading_result_id: str | None
     grading_run_id: str
@@ -185,6 +220,18 @@ class GradingResultExportResponse(PilotContract):
     confidence: Decimal | None
     feedback: str | None
     explanation_payload: JsonObject
+    criterion_results: list["CriterionResultResponse"] = Field(default_factory=list)
+
+
+class CriterionResultResponse(PilotContract):
+    id: str | None
+    criterion_key: str
+    source: str
+    score: Decimal | None
+    max_score: Decimal | None
+    confidence: Decimal | None
+    explanation: str | None
+    metadata_payload: JsonObject
 
 
 class ReviewedExamplePayloadResponse(PilotContract):
@@ -201,3 +248,38 @@ class ReviewedExamplePayloadResponse(PilotContract):
     teacher_decision: str | None
     teacher_review_id: str | None
     metadata: JsonObject
+
+
+class AIInteractionSummaryResponse(PilotContract):
+    id: str | None
+    provider: str
+    model: str
+    validation_status: Literal["pending", "valid", "invalid", "failed"]
+    error_message: str | None = None
+
+
+class GradingRunResponse(PilotContract):
+    grading_run_id: str
+    grading_run_status: str
+    grading_result: GradingResultExportResponse | None
+    review_task_id: str | None = None
+    ai_interaction: AIInteractionSummaryResponse | None = None
+
+
+class ReviewActionResponse(PilotContract):
+    review_task: ReviewTaskSummaryResponse
+    grading_result: GradingResultExportResponse
+    teacher_review_id: str | None
+    decision: str
+    teacher_override_id: str | None = None
+    regrade_run_id: str | None = None
+    actionable: bool
+
+
+class DemoGradingContextResponse(PilotContract):
+    actor_user_id: str
+    organization_id: str
+    role: Literal["teacher"]
+    submission_id: str
+    rubric_version_id: str
+    answer_key_version_id: str | None = None

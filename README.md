@@ -133,6 +133,14 @@ This is still not production JWT verification, OAuth/OIDC client configuration, 
 
 See [docs/logic/22-phase6d-current-schema-auth-readiness.md](docs/logic/22-phase6d-current-schema-auth-readiness.md).
 
+## Phase 6E Status
+
+Phase 6E adds the first real local-AI provider adapter and authenticated grading execution route. RubriCore-STE can now call a free local Ollama model through the existing `AIGradingProvider` boundary while keeping deterministic checks, validation, confidence routing, and audit semantics in core grading orchestration.
+
+The default local development model is `llama3.2:1b`, served by Ollama at `http://localhost:11434`. `POST /pilot/grading-runs` can now run tenant-scoped grading for authorized pilot users. This is still not a teacher-facing UI, batch grading runner, provider router, retry budget, model regression suite, or production deployment package.
+
+See [docs/logic/23-phase6e-local-ai-provider.md](docs/logic/23-phase6e-local-ai-provider.md).
+
 ## Current Backend Foundation
 
 The current public backend foundation includes:
@@ -156,6 +164,7 @@ The current public backend foundation includes:
 | Auth provider adapter | Phase 6B framework-light provider interface and development-only pilot-header implementation |
 | Production auth provider selection | Phase 6C OIDC/JWT bearer-token decision, future config inputs, claim mapping, membership lookup, and failure-mode design |
 | Current-schema auth readiness | Phase 6D constrained org-scoped user auth-resolution path and migration triggers |
+| Local AI provider | Phase 6E Ollama-backed grading provider adapter and authenticated grading route for free local structured AI suggestions |
 | Audit trail | Append-only audit records for major Phase 1 lifecycle, grading, review, and rubric-context actions |
 | Fixtures | Public-safe synthetic Python score-summary assignment and evaluation fixtures with knowledge-source examples |
 | Tests | Unit coverage for taxonomy, rubric framework, answer lifecycle, artifact provenance, grading orchestration, review policy, knowledge-library logic, rubric suggestions, and audit events |
@@ -211,6 +220,7 @@ The current public backend foundation includes:
 | [docs/logic/20-phase6b-auth-provider-adapter.md](docs/logic/20-phase6b-auth-provider-adapter.md) | Phase 6B production-auth adapter boundary without a real auth provider |
 | [docs/logic/21-phase6c-production-auth-provider-selection.md](docs/logic/21-phase6c-production-auth-provider-selection.md) | Phase 6C production auth provider selection without implementation |
 | [docs/logic/22-phase6d-current-schema-auth-readiness.md](docs/logic/22-phase6d-current-schema-auth-readiness.md) | Phase 6D current-schema production auth readiness without implementation |
+| [docs/logic/23-phase6e-local-ai-provider.md](docs/logic/23-phase6e-local-ai-provider.md) | Phase 6E local Ollama provider adapter and setup notes |
 
 ## Quick Start
 
@@ -258,6 +268,29 @@ Run the local Phase 4 pilot HTTP smoke script:
 
 ```sh
 .venv/bin/python scripts/smoke_phase4_http_api.py
+```
+
+Run the local Ollama AI provider:
+
+```sh
+open -a Ollama --args hidden
+/Applications/Ollama.app/Contents/Resources/ollama pull llama3.2:1b
+```
+
+If the `ollama` CLI symlink is installed, use `ollama pull llama3.2:1b`.
+
+Run an authenticated FastAPI grading request after seeding local data:
+
+```sh
+.venv/bin/uvicorn app.pilot.fastapi_app:app --host 127.0.0.1 --port 8080
+```
+
+Then open [http://127.0.0.1:8080/pilot/ui](http://127.0.0.1:8080/pilot/ui), click `Load sample data`, and run the seeded demo grading request. The same flow is available as `POST /pilot/grading-runs` with pilot auth headers and the submitted package plus rubric version ids you want graded.
+
+Run the live pilot review-action smoke after PostgreSQL is migrated, dev data is seeded, and Ollama is running:
+
+```sh
+.venv/bin/python scripts/smoke_pilot_review_actions.py
 ```
 
 Optionally run the local pilot HTTP server:
@@ -350,7 +383,7 @@ The project uses the MIT License. Before a broader public release, consider addi
 | Phase 2 | Complete as backend MVP: knowledge-library backend, pilot services, contracts, and workflow facade implemented; public API/UI, richer import workflows, and provider integrations deferred |
 | Phase 3 | Evaluation datasets, calibration, reliability metrics, and model/prompt regression testing |
 | Phase 4 | Provider routing, fallback policy, scale-out, and batch grading |
-| Phase 5 | Self-hosted AI evaluation and deployment options |
+| Phase 5 | Self-hosted AI evaluation and deployment options; first local Ollama adapter now available for development |
 
 ## Data Safety
 
