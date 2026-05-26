@@ -287,6 +287,12 @@ Run an authenticated FastAPI grading request after seeding local data:
 
 Then open [http://127.0.0.1:8080/pilot/ui](http://127.0.0.1:8080/pilot/ui), click `Load sample data`, and run the seeded demo grading request. The same flow is available as `POST /pilot/grading-runs` with pilot auth headers and the submitted package plus rubric version ids you want graded.
 
+Run the live pilot review-action smoke after PostgreSQL is migrated, dev data is seeded, and Ollama is running:
+
+```sh
+.venv/bin/python scripts/smoke_pilot_review_actions.py
+```
+
 Optionally run the local pilot HTTP server:
 
 ```sh
